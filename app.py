@@ -10,6 +10,15 @@ import zipfile
 
 import requests
 from flask import Flask, jsonify, render_template, request
+from pygltflib import (
+    GLTF2,
+    BufferView,
+    Image,
+    Material,
+    PbrMetallicRoughness,
+    Texture,
+    TextureInfo,
+)
 
 app = Flask(__name__)
 
@@ -46,6 +55,72 @@ def find_main_mesh_file(folder):
     priority = {".glb": 0, ".gltf": 1, ".obj": 2, ".fbx": 3, ".dae": 4, ".stl": 5, ".ply": 6, ".3ds": 7}
     candidates.sort(key=lambda p: priority.get(os.path.splitext(p)[1].lower(), 99))
     return candidates[0]
+
+
+def attach_fallback_texture(glb_path, texture_path, work_dir):
+    """Abre um .glb e força a imagem em `texture_path` como a textura base
+    de qualquer material que esteja sem nenhuma textura aplicada (e cria um
+    material novo pras meshes que nem isso têm). Não toca em materiais que
+    já têm textura própria. Depende do mesh já ter UV mapping — a maioria
+    tem, mesmo sem a textura linkada."""
+    gltf = GLTF2().load_binary(glb_path)
+
+    with open(texture_path, "rb") as f:
+        img_bytes = f.read()
+
+    ext = os.path.splitext(texture_path)[1].lower()
+    mime = "image/png" if ext == ".png" else "image/jpeg"
+
+    blob = gltf.binary_blob() or b""
+    pad = (-len(blob)) % 4
+    blob = blob + b"\x00" * pad
+
+    offset = len(blob)
+    new_blob = blob + img_bytes
+    new_blob = new_blob + b"\x00" * ((-len(new_blob)) % 4)
+
+    buffer_view_index = len(gltf.bufferViews)
+    gltf.bufferViews.append(BufferView(buffer=0, byteOffset=offset, byteLength=len(img_bytes)))
+
+    image_index = len(gltf.images)
+    gltf.images.append(Image(bufferView=buffer_view_index, mimeType=mime))
+
+    texture_index = len(gltf.textures)
+    gltf.textures.append(Texture(source=image_index))
+
+    if gltf.buffers:
+        gltf.buffers[0].byteLength = len(new_blob)
+
+    # Garante que existe pelo menos um material com a textura
+    fallback_material_index = None
+    for i, material in enumerate(gltf.materials):
+        if material.pbrMetallicRoughness is None:
+            material.pbrMetallicRoughness = PbrMetallicRoughness()
+        if material.pbrMetallicRoughness.baseColorTexture is None:
+            material.pbrMetallicRoughness.baseColorTexture = TextureInfo(index=texture_index)
+            if fallback_material_index is None:
+                fallback_material_index = i
+
+    if not gltf.materials:
+        gltf.materials.append(
+            Material(pbrMetallicRoughness=PbrMetallicRoughness(baseColorTexture=TextureInfo(index=texture_index)))
+        )
+        fallback_material_index = 0
+
+    if fallback_material_index is None:
+        fallback_material_index = 0
+
+    # Qualquer primitive sem material nenhum recebe o material com a textura nova
+    for mesh in gltf.meshes:
+        for primitive in mesh.primitives:
+            if primitive.material is None:
+                primitive.material = fallback_material_index
+
+    gltf.set_binary_blob(new_blob)
+
+    output_path = os.path.join(work_dir, "with_texture.glb")
+    gltf.save_binary(output_path)
+    return output_path
 
 
 def convert_to_glb(mesh_path, work_dir):
@@ -117,7 +192,7 @@ def upload_to_roblox(glb_path, display_name, description):
     raise RuntimeError("Deu timeout esperando a moderação da Roblox responder. Tente checar seu Inventário em alguns minutos.")
 
 
-def process_job(job_id, saved_path, display_name, description):
+def process_job(job_id, saved_path, display_name, description, texture_path=None):
     """Roda em background: extrai/converte/envia, e guarda o resultado em JOBS."""
     try:
         with tempfile.TemporaryDirectory() as work_dir:
@@ -142,13 +217,26 @@ def process_job(job_id, saved_path, display_name, description):
                 raise RuntimeError(f"Formato '{ext}' não é um modelo 3D suportado.")
 
             glb_path = convert_to_glb(mesh_path, work_dir)
+
+            warning = None
+            if texture_path:
+                try:
+                    glb_path = attach_fallback_texture(glb_path, texture_path, work_dir)
+                except Exception as exc:  # noqa: BLE001
+                    # Se a injeção da textura falhar, não aborta o upload —
+                    # sobe sem a textura e avisa o motivo.
+                    warning = f"Não consegui aplicar a textura manual ({exc}); o modelo subiu sem ela."
+
             asset_id = upload_to_roblox(glb_path, display_name, description)
 
-            JOBS[job_id] = {
+            result = {
                 "status": "done",
                 "assetId": asset_id,
                 "inventoryUrl": "https://www.roblox.com/users/inventory/#!/3d-model",
             }
+            if warning:
+                result["warning"] = warning
+            JOBS[job_id] = result
     except Exception as exc:  # noqa: BLE001
         JOBS[job_id] = {"status": "error", "error": str(exc)}
     finally:
@@ -156,6 +244,11 @@ def process_job(job_id, saved_path, display_name, description):
             os.remove(saved_path)
         except OSError:
             pass
+        if texture_path:
+            try:
+                os.remove(texture_path)
+            except OSError:
+                pass
 
 
 @app.route("/")
@@ -187,12 +280,22 @@ def upload():
         shutil.rmtree(upload_dir, ignore_errors=True)
         return jsonify({"error": "Arquivo maior que o limite de 20MB da Roblox."}), 400
 
+    texture_path = None
+    texture_file = request.files.get("texture")
+    if texture_file and texture_file.filename:
+        texture_ext = os.path.splitext(texture_file.filename)[1].lower()
+        if texture_ext not in {".png", ".jpg", ".jpeg"}:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            return jsonify({"error": "A textura manual precisa ser .png, .jpg ou .jpeg."}), 400
+        texture_path = os.path.join(upload_dir, "manual_texture" + texture_ext)
+        texture_file.save(texture_path)
+
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {"status": "processing"}
 
     thread = threading.Thread(
         target=process_job,
-        args=(job_id, saved_path, display_name, description),
+        args=(job_id, saved_path, display_name, description, texture_path),
         daemon=True,
     )
     thread.start()

@@ -66,6 +66,29 @@ Abra a URL que o Render te deu (algo como
 senha (`APP_SECRET`) uma vez — ela fica salva no navegador — e mande seus
 modelos.
 
+## Modelo sem textura aplicada (FBX puro, textura solta etc.)
+
+Se o `.fbx`/`.obj` não tiver a textura linkada internamente, use o campo
+**"Textura manual"** na página: ele injeta a imagem escolhida como a
+textura base de qualquer material do modelo que esteja sem nenhuma.
+
+Como isso funciona por baixo dos panos: a maioria dos modelos já vem com
+**UV mapping** correto (a informação de "como a textura se encaixa na
+superfície"), mesmo quando não tem a imagem da textura linkada. O servidor
+abre o `.glb` já convertido e injeta a imagem que você mandou em qualquer
+material sem textura, reaproveitando o UV que já existe no mesh.
+
+Isso **não funciona** se:
+- O modelo não tem UV mapping nenhum (raro, mas existe) — a textura vai
+  ficar distorcida ou esticada de forma errada.
+- Você não tem a imagem da textura em lugar nenhum (não tem como inventar
+  cor que não existe).
+
+Se o modelo tiver várias texturas (diffuse, normal, roughness...), escolha
+a que tiver "diffuse", "albedo", "basecolor" ou "color" no nome — é a única
+que a Roblox MeshPart realmente usa (não há suporte completo a PBR nesse
+fluxo de upload).
+
 ## Limites importantes da Roblox (Open Cloud)
 
 - Até **20 MB** por arquivo.
