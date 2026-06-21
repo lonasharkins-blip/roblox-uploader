@@ -1,260 +1,392 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Upload pra Roblox</title>
-  <style>
-    :root {
-      --bg: #0f1117;
-      --panel: #171a23;
-      --border: #262b38;
-      --text: #e9ebf1;
-      --muted: #8b90a3;
-      --accent: #ff5b3d; /* aceno da Roblox sem copiar a marca: um laranja-avermelhado quente */
-      --accent-dim: #3a2420;
-      --ok: #4caf6a;
-      --error: #ef5b5b;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mesh → Roblox</title>
+<style>
+  :root {
+    --bg-1: #0b1130;
+    --bg-2: #1b2456;
+    --panel: #141a3c;
+    --panel-soft: #181f47;
+    --border: #2a3262;
+    --text: #f0f1fb;
+    --muted: #8d93bd;
+    --gold: #e8c27a;
+    --blue: #7c93ff;
+    --ok: #6fd19a;
+    --ok-bg: #122a22;
+    --error: #ff8b8b;
+    --error-bg: #2a1722;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(circle at 20% -10%, #232d63 0%, var(--bg-1) 55%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .page { max-width: 560px; margin: 0 auto; padding: 18px 16px 70px; }
 
-    * { box-sizing: border-box; }
+  /* ---------- Top bar ---------- */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 4px 22px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15px; }
+  .brand-mark {
+    width: 28px; height: 28px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--gold), var(--blue));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  .nav-links { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+  .nav-links a { color: inherit; text-decoration: none; }
+  .nav-links a:hover { color: var(--text); }
 
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      padding: 24px 16px 60px;
-    }
+  /* ---------- Hero ---------- */
+  .hero {
+    position: relative;
+    background: linear-gradient(135deg, var(--bg-2) 0%, #0e1442 100%);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 30px 24px 26px;
+    overflow: hidden;
+    margin-bottom: 18px;
+  }
+  .hero .eyebrow {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--gold); font-weight: 700; margin-bottom: 10px;
+  }
+  .hero h1 { font-size: 27px; line-height: 1.2; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .hero p { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0 0 20px; max-width: 86%; }
+  .hero .cta {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--gold); color: #2a1d06; font-weight: 700; font-size: 14px;
+    padding: 11px 18px; border-radius: 100px; text-decoration: none;
+  }
+  .sparkle { position: absolute; opacity: 0.85; }
+  .crystal-wrap { position: absolute; right: -18px; top: -10px; width: 150px; height: 150px; opacity: 0.9; }
 
-    .wrap { max-width: 480px; margin: 0 auto; }
+  /* ---------- Cards ---------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--blue); background: #1c2456; padding: 3px 8px; border-radius: 100px;
+  }
 
-    h1 {
-      font-size: 22px;
-      margin: 0 0 4px;
-      letter-spacing: -0.01em;
-    }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin: 14px 0 6px; }
+  label:first-of-type { margin-top: 0; }
+  input[type="text"], input[type="password"] {
+    width: 100%; background: var(--bg-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 11px 13px; color: var(--text); font-size: 15px;
+  }
+  input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
 
-    .subtitle {
-      color: var(--muted);
-      font-size: 14px;
-      margin: 0 0 28px;
-    }
+  .file-drop {
+    border: 1.5px dashed var(--border); border-radius: 10px; padding: 18px 14px;
+    text-align: center; cursor: pointer; transition: border-color 0.15s;
+  }
+  .file-drop.has-file { border-color: var(--gold); }
+  .file-drop input { display: none; }
+  .file-drop .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .file-drop .filename { color: var(--gold); font-weight: 600; word-break: break-all; font-size: 14px; }
 
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 18px;
-      margin-bottom: 16px;
-    }
+  .hint-block {
+    font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5;
+    border-left: 2px solid var(--border); padding-left: 10px;
+  }
 
-    label {
-      display: block;
-      font-size: 13px;
-      color: var(--muted);
-      margin-bottom: 6px;
-      margin-top: 16px;
-    }
-    label:first-child { margin-top: 0; }
+  button.primary {
+    width: 100%; padding: 14px; border-radius: 10px; border: none;
+    background: var(--gold); color: #2a1d06; font-size: 15px; font-weight: 700;
+    margin-top: 18px; cursor: pointer;
+  }
+  button.primary:disabled { background: #4a4a55; color: #9a9aa5; }
 
-    input[type="text"],
-    input[type="password"] {
-      width: 100%;
-      background: #0f1117;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 14px;
-      color: var(--text);
-      font-size: 15px;
-    }
-    input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .status { margin-top: 14px; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; display: none; line-height: 1.5; }
+  .status.show { display: block; }
+  .status.processing { background: #1c2456; color: #aebaff; }
+  .status.done { background: var(--ok-bg); color: var(--ok); }
+  .status.error { background: var(--error-bg); color: var(--error); }
+  .status a { color: inherit; text-decoration: underline; }
+  .status .warning-line { color: var(--gold); margin-top: 6px; display: block; }
 
-    .file-drop {
-      border: 1.5px dashed var(--border);
-      border-radius: 10px;
-      padding: 22px 14px;
-      text-align: center;
-      cursor: pointer;
-      transition: border-color 0.15s;
-    }
-    .file-drop.has-file { border-color: var(--accent); }
-    .file-drop input { display: none; }
-    .file-drop .hint { color: var(--muted); font-size: 13px; margin-top: 4px; }
-    .file-drop .filename { color: var(--accent); font-weight: 600; word-break: break-all; }
+  .spinner {
+    display: inline-block; width: 11px; height: 11px;
+    border: 2px solid #aebaff; border-top-color: transparent; border-radius: 50%;
+    margin-right: 7px; animation: spin 0.8s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-    button {
-      width: 100%;
-      padding: 14px;
-      border-radius: 10px;
-      border: none;
-      background: var(--accent);
-      color: #1a0d08;
-      font-size: 15px;
-      font-weight: 700;
-      margin-top: 20px;
-      cursor: pointer;
-    }
-    button:disabled { background: #4a4540; color: #8a8580; cursor: default; }
+  /* ---------- Histórico ---------- */
+  .history-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; background: var(--panel-soft); border-radius: 100px;
+    margin-bottom: 8px; font-size: 13px;
+  }
+  .history-row .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .history-row .dot.ok { background: var(--ok); }
+  .history-row .dot.err { background: var(--error); }
+  .history-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history-row .id { color: var(--muted); font-size: 11.5px; }
+  .empty-history { color: var(--muted); font-size: 13px; padding: 4px 2px; }
 
-    .status {
-      margin-top: 16px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      font-size: 14px;
-      display: none;
-    }
-    .status.show { display: block; }
-    .status.processing { background: var(--accent-dim); color: #ffb39e; }
-    .status.done { background: #16271c; color: var(--ok); }
-    .status.error { background: #2a1717; color: var(--error); }
-
-    .status a { color: inherit; text-decoration: underline; }
-
-    .spinner {
-      display: inline-block;
-      width: 12px; height: 12px;
-      border: 2px solid #ffb39e;
-      border-top-color: transparent;
-      border-radius: 50%;
-      margin-right: 8px;
-      animation: spin 0.8s linear infinite;
-      vertical-align: -1px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .formats {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 10px;
-      line-height: 1.5;
-    }
-  </style>
+  /* ---------- Tip cards ---------- */
+  .tip-card { display: flex; gap: 12px; padding: 14px; }
+  .tip-card .icon {
+    width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+    background: #1c2456; display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .tip-card .title { font-weight: 700; font-size: 13.5px; margin-bottom: 3px; }
+  .tip-card .desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Upload pra Roblox</h1>
-    <p class="subtitle">Envia um modelo 3D (e textura) direto do celular pro seu inventário do Roblox.</p>
+<div class="page">
 
-    <div class="card">
-      <label for="secret">Senha do site</label>
-      <input type="password" id="secret" placeholder="A senha que você definiu no Render" />
-
-      <label for="file">Arquivo do modelo</label>
-      <div class="file-drop" id="dropArea">
-        <input type="file" id="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.ply,.zip" />
-        <div id="dropLabel">Tocar pra escolher arquivo</div>
-        <div class="hint">.glb, .gltf, .obj, .fbx ou um .zip com mesh + textura</div>
-      </div>
-
-      <label for="displayName">Nome do modelo</label>
-      <input type="text" id="displayName" placeholder="Ex: Cadeira de madeira" maxlength="50" />
-
-      <label for="description">Descrição (opcional)</label>
-      <input type="text" id="description" placeholder="Detalhes sobre o modelo" maxlength="200" />
-
-      <div class="formats">
-        Dica: se o modelo vier com mesh e textura em arquivos separados, junte tudo num .zip antes de enviar — a conversão pra .glb é feita aqui automaticamente.
-      </div>
-
-      <button id="submitBtn">Enviar pra Roblox</button>
-
-      <div class="status" id="statusBox"></div>
+  <div class="topbar">
+    <div class="brand">
+      <span class="brand-mark">🧊</span>
+      Mesh → Roblox
+    </div>
+    <div class="nav-links">
+      <a href="#upload-card">Upload</a>
+      <a href="#tips">Dicas</a>
     </div>
   </div>
 
-  <script>
-    const secretInput = document.getElementById('secret');
-    const fileInput = document.getElementById('file');
-    const dropArea = document.getElementById('dropArea');
-    const dropLabel = document.getElementById('dropLabel');
-    const submitBtn = document.getElementById('submitBtn');
-    const statusBox = document.getElementById('statusBox');
+  <div class="hero">
+    <svg class="sparkle" style="top:14px; left:55%; width:14px;" viewBox="0 0 24 24" fill="none">
+      <path d="M12 0L14 10L24 12L14 14L12 24L10 14L0 12L10 10Z" fill="#e8c27a"/>
+    </svg>
+    <svg class="sparkle" style="top:60px; left:70%; width:8px; opacity:0.6;" viewBox="0 0 24 24" fill="none">
+      <path d="M12 0L14 10L24 12L14 14L12 24L10 14L0 12L10 10Z" fill="#7c93ff"/>
+    </svg>
 
-    // Lembra a senha localmente no navegador do celular (não sai daqui)
-    secretInput.value = localStorage.getItem('roblox_uploader_secret') || '';
-    secretInput.addEventListener('change', () => {
-      localStorage.setItem('roblox_uploader_secret', secretInput.value);
-    });
+    <svg class="crystal-wrap" viewBox="0 0 150 150" fill="none">
+      <polygon points="75,18 118,55 100,128 50,128 32,55" fill="url(#g1)" opacity="0.9"/>
+      <polygon points="75,18 118,55 75,72 32,55" fill="url(#g2)" opacity="0.95"/>
+      <polygon points="75,72 118,55 100,128 75,128" fill="#5567c9" opacity="0.55"/>
+      <defs>
+        <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#9aa8ff"/>
+          <stop offset="1" stop-color="#4a59b0"/>
+        </linearGradient>
+        <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#f2d9a0"/>
+          <stop offset="1" stop-color="#cf9f55"/>
+        </linearGradient>
+      </defs>
+    </svg>
 
-    dropArea.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files.length) {
-        dropLabel.textContent = fileInput.files[0].name;
-        dropArea.classList.add('has-file');
-      }
-    });
+    <div class="eyebrow">Ferramenta pessoal</div>
+    <h1>Suba seu modelo 3D<br/>direto pro Roblox</h1>
+    <p>Manda o mesh (e a textura, se tiver) pelo celular — a conversão pra .glb e o envio pro seu inventário acontecem aqui.</p>
+    <a href="#upload-card" class="cta">Começar upload ↓</a>
+  </div>
 
-    function setStatus(kind, html) {
-      statusBox.className = 'status show ' + kind;
-      statusBox.innerHTML = html;
+  <div class="card" id="upload-card">
+    <h2>Enviar arquivo <span class="tag">passo 1</span></h2>
+
+    <label for="secret">Senha do site</label>
+    <input type="password" id="secret" placeholder="A senha definida no Render (APP_SECRET)" />
+
+    <label for="file">Modelo 3D</label>
+    <div class="file-drop" id="dropArea">
+      <input type="file" id="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.ply,.zip" />
+      <div id="dropLabel">Tocar pra escolher arquivo</div>
+      <div class="hint">.glb, .gltf, .obj, .fbx ou um .zip com mesh + textura</div>
+    </div>
+
+    <label for="texture">Textura manual (opcional)</label>
+    <div class="file-drop" id="dropAreaTex">
+      <input type="file" id="texture" accept=".png,.jpg,.jpeg" />
+      <div id="dropLabelTex">Tocar pra escolher imagem</div>
+      <div class="hint">Use só se o modelo vier sem cor (FBX puro, textura solta etc.)</div>
+    </div>
+    <div class="hint-block">
+      Se a textura aplicada não encaixar certinho, é sinal de que o modelo não tinha UV mapping — nesse caso não tem como corrigir por aqui.
+    </div>
+
+    <label for="displayName">Nome do modelo</label>
+    <input type="text" id="displayName" placeholder="Ex: Cadeira de madeira" maxlength="50" />
+
+    <label for="description">Descrição (opcional)</label>
+    <input type="text" id="description" placeholder="Detalhes sobre o modelo" maxlength="200" />
+
+    <button class="primary" id="submitBtn">Enviar pra Roblox</button>
+
+    <div class="status" id="statusBox"></div>
+  </div>
+
+  <div class="card">
+    <h2>Histórico <span class="tag">local</span></h2>
+    <div id="historyList"></div>
+  </div>
+
+  <div class="card tip-card" id="tips">
+    <div class="icon">🎨</div>
+    <div>
+      <div class="title">Sem cor no modelo?</div>
+      <div class="desc">Use o campo de "Textura manual" acima. Funciona melhor com imagens nomeadas como diffuse/albedo/basecolor.</div>
+    </div>
+  </div>
+
+  <div class="card tip-card">
+    <div class="icon">📦</div>
+    <div>
+      <div class="title">Formatos aceitos</div>
+      <div class="desc">.glb, .gltf, .obj, .fbx, .dae, .stl, .ply — ou um .zip com tudo junto. .blend não é suportado.</div>
+    </div>
+  </div>
+
+  <div class="card tip-card">
+    <div class="icon">⏱️</div>
+    <div>
+      <div class="title">Limite da Roblox</div>
+      <div class="desc">20MB por arquivo, e a moderação automática pode levar de segundos a alguns minutos.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const secretInput = document.getElementById('secret');
+  const fileInput = document.getElementById('file');
+  const textureInput = document.getElementById('texture');
+  const dropArea = document.getElementById('dropArea');
+  const dropAreaTex = document.getElementById('dropAreaTex');
+  const dropLabel = document.getElementById('dropLabel');
+  const dropLabelTex = document.getElementById('dropLabelTex');
+  const submitBtn = document.getElementById('submitBtn');
+  const statusBox = document.getElementById('statusBox');
+  const historyList = document.getElementById('historyList');
+
+  secretInput.value = localStorage.getItem('roblox_uploader_secret') || '';
+  secretInput.addEventListener('change', () => {
+    localStorage.setItem('roblox_uploader_secret', secretInput.value);
+  });
+
+  dropArea.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) {
+      dropLabel.textContent = fileInput.files[0].name;
+      dropArea.classList.add('has-file');
     }
+  });
 
-    async function pollStatus(jobId) {
-      try {
-        const res = await fetch('/status/' + jobId);
-        const data = await res.json();
+  dropAreaTex.addEventListener('click', () => textureInput.click());
+  textureInput.addEventListener('change', () => {
+    if (textureInput.files.length) {
+      dropLabelTex.textContent = textureInput.files[0].name;
+      dropAreaTex.classList.add('has-file');
+    }
+  });
 
-        if (data.status === 'processing') {
-          setStatus('processing', '<span class="spinner"></span>Enviando e esperando a moderação da Roblox… isso pode levar até 1-2 minutos.');
-          setTimeout(() => pollStatus(jobId), 3000);
-        } else if (data.status === 'done') {
-          setStatus('done', `Pronto! Asset ID <b>${data.assetId}</b> criado.<br><a href="${data.inventoryUrl}" target="_blank">Ver no seu Inventário</a>`);
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Enviar pra Roblox';
-        } else if (data.status === 'error') {
-          setStatus('error', data.error || 'Algo deu errado.');
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Enviar pra Roblox';
-        }
-      } catch (e) {
-        setStatus('error', 'Perdi a conexão checando o status. Confira seu Inventário na Roblox em alguns minutos.');
+  function loadHistory() {
+    const items = JSON.parse(localStorage.getItem('rbx_history') || '[]');
+    if (!items.length) {
+      historyList.innerHTML = '<div class="empty-history">Nenhum upload ainda.</div>';
+      return;
+    }
+    historyList.innerHTML = items.map(it => `
+      <div class="history-row">
+        <span class="dot ${it.ok ? 'ok' : 'err'}"></span>
+        <span class="name">${it.name}</span>
+        <span class="id">${it.ok ? '#' + it.assetId : 'falhou'}</span>
+      </div>
+    `).join('');
+  }
+
+  function pushHistory(entry) {
+    const items = JSON.parse(localStorage.getItem('rbx_history') || '[]');
+    items.unshift(entry);
+    localStorage.setItem('rbx_history', JSON.stringify(items.slice(0, 8)));
+    loadHistory();
+  }
+
+  loadHistory();
+
+  function setStatus(kind, html) {
+    statusBox.className = 'status show ' + kind;
+    statusBox.innerHTML = html;
+  }
+
+  async function pollStatus(jobId, modelName) {
+    try {
+      const res = await fetch('/status/' + jobId);
+      const data = await res.json();
+
+      if (data.status === 'processing') {
+        setStatus('processing', '<span class="spinner"></span>Enviando e esperando a moderação da Roblox… pode levar até 1-2 minutos.');
+        setTimeout(() => pollStatus(jobId, modelName), 3000);
+      } else if (data.status === 'done') {
+        let html = `Pronto! Asset ID <b>${data.assetId}</b> criado.<br><a href="${data.inventoryUrl}" target="_blank">Ver no seu Inventário</a>`;
+        if (data.warning) html += `<span class="warning-line">⚠ ${data.warning}</span>`;
+        setStatus('done', html);
+        pushHistory({ name: modelName, ok: true, assetId: data.assetId });
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Enviar pra Roblox';
+      } else if (data.status === 'error') {
+        setStatus('error', data.error || 'Algo deu errado.');
+        pushHistory({ name: modelName, ok: false });
         submitBtn.disabled = false;
         submitBtn.textContent = 'Enviar pra Roblox';
       }
+    } catch (e) {
+      setStatus('error', 'Perdi a conexão checando o status. Confira seu Inventário na Roblox em alguns minutos.');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Enviar pra Roblox';
     }
+  }
 
-    submitBtn.addEventListener('click', async () => {
-      if (!secretInput.value) {
-        setStatus('error', 'Digita a senha do site primeiro.');
-        return;
-      }
-      if (!fileInput.files.length) {
-        setStatus('error', 'Escolhe um arquivo primeiro.');
-        return;
-      }
+  submitBtn.addEventListener('click', async () => {
+    if (!secretInput.value) { setStatus('error', 'Digita a senha do site primeiro.'); return; }
+    if (!fileInput.files.length) { setStatus('error', 'Escolhe um arquivo de modelo primeiro.'); return; }
 
-      localStorage.setItem('roblox_uploader_secret', secretInput.value);
+    localStorage.setItem('roblox_uploader_secret', secretInput.value);
 
-      const formData = new FormData();
-      formData.append('secret', secretInput.value);
-      formData.append('file', fileInput.files[0]);
-      formData.append('displayName', document.getElementById('displayName').value);
-      formData.append('description', document.getElementById('description').value);
+    const modelName = document.getElementById('displayName').value || fileInput.files[0].name;
 
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Enviando…';
-      setStatus('processing', '<span class="spinner"></span>Subindo arquivo…');
+    const formData = new FormData();
+    formData.append('secret', secretInput.value);
+    formData.append('file', fileInput.files[0]);
+    if (textureInput.files.length) formData.append('texture', textureInput.files[0]);
+    formData.append('displayName', document.getElementById('displayName').value);
+    formData.append('description', document.getElementById('description').value);
 
-      try {
-        const res = await fetch('/upload', { method: 'POST', body: formData });
-        const data = await res.json();
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Enviando…';
+    setStatus('processing', '<span class="spinner"></span>Subindo arquivo…');
 
-        if (!res.ok) {
-          setStatus('error', data.error || 'Erro no envio.');
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Enviar pra Roblox';
-          return;
-        }
+    try {
+      const res = await fetch('/upload', { method: 'POST', body: formData });
+      const data = await res.json();
 
-        pollStatus(data.jobId);
-      } catch (e) {
-        setStatus('error', 'Não consegui falar com o servidor.');
+      if (!res.ok) {
+        setStatus('error', data.error || 'Erro no envio.');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Enviar pra Roblox';
+        return;
       }
-    });
-  </script>
+
+      pollStatus(data.jobId, modelName);
+    } catch (e) {
+      setStatus('error', 'Não consegui falar com o servidor.');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Enviar pra Roblox';
+    }
+  });
+</script>
 </body>
 </html>
