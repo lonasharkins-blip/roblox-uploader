@@ -34,6 +34,7 @@ ROBLOX_OPERATION_URL = "https://apis.roblox.com/assets/v1/operations/{}"
 
 MESH_EXTENSIONS = {".glb", ".gltf", ".obj", ".fbx", ".dae", ".3ds", ".stl", ".ply"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # um pouco acima do limite de 20MB da Roblox p/ dar erro melhor
+DEFAULT_TARGET_SIZE = 6.0  # studs, lado maior do model — tamanho-base "tipo humano"
 
 # Guarda o status dos jobs em memória (ok pra uso pessoal / single instance)
 JOBS = {}
@@ -55,6 +56,68 @@ def find_main_mesh_file(folder):
     priority = {".glb": 0, ".gltf": 1, ".obj": 2, ".fbx": 3, ".dae": 4, ".stl": 5, ".ply": 6, ".3ds": 7}
     candidates.sort(key=lambda p: priority.get(os.path.splitext(p)[1].lower(), 99))
     return candidates[0]
+
+
+def convert_to_glb(mesh_path, work_dir):
+    """Usa o assimp pra (re)exportar o modelo como um único .glb autocontido.
+
+    Mesmo arquivos que já SÃO .glb passam por aqui de propósito: isso ajuda a
+    normalizar formatos de textura/compressão que a fonte original usa sem
+    avisar (ex: compressão Draco na malha, texturas Basis Universal/KTX2) e
+    que a Roblox não entende. Se a reconversão falhar, cai de volta pro
+    arquivo original sem alterações, em vez de travar o upload.
+    """
+    output_path = os.path.join(work_dir, "converted.glb")
+    result = subprocess.run(
+        ["assimp", "export", mesh_path, output_path],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    if result.returncode == 0 and os.path.exists(output_path):
+        return output_path, None
+
+    ext = os.path.splitext(mesh_path)[1].lower()
+    if ext == ".glb":
+        return mesh_path, (
+            "Não consegui reprocessar esse .glb pra normalizar formato/compressão "
+            "(pode usar algo como compressão Draco). Subiu o arquivo original, sem ajustes."
+        )
+
+    raise RuntimeError(
+        "Não consegui converter esse arquivo pra .glb. "
+        f"Detalhe técnico: {result.stderr.strip()[-500:]}"
+    )
+
+
+def diagnose_missing_texture(glb_path, manual_texture_provided):
+    """Inspeciona o .glb final e, se não tiver nenhuma imagem embutida, tenta
+    apontar o motivo mais provável — só pra informar, não tenta mais nada."""
+    if manual_texture_provided:
+        return None
+    try:
+        gltf = GLTF2().load_binary(glb_path)
+    except Exception:
+        return None
+
+    if gltf.images:
+        return None
+
+    used = set(gltf.extensionsUsed or [])
+    if "KHR_draco_mesh_compression" in used:
+        return (
+            "Esse modelo usa compressão Draco e pode ter perdido textura/detalhe na conversão — "
+            "se existir, procure a versão 'sem compressão' (uncompressed) na fonte original."
+        )
+    if "KHR_texture_basisu" in used:
+        return (
+            "Esse modelo usa textura comprimida em Basis Universal/KTX2, que não converte bem por aqui — "
+            "procure a versão com textura em PNG/JPG normal ou anexe a imagem manualmente."
+        )
+    if "KHR_materials_pbrSpecularGlossiness" in used or "KHR_materials_unlit" in used:
+        return "Esse modelo define a cor de um jeito não totalmente compatível com esse fluxo — anexar a textura manualmente garante o resultado."
+    return "Não encontrei nenhuma imagem dentro desse modelo — pode ser que a textura nunca tenha vindo junto na fonte original."
 
 
 def attach_fallback_texture(glb_path, texture_path, work_dir):
@@ -91,7 +154,6 @@ def attach_fallback_texture(glb_path, texture_path, work_dir):
     if gltf.buffers:
         gltf.buffers[0].byteLength = len(new_blob)
 
-    # Garante que existe pelo menos um material com a textura
     fallback_material_index = None
     for i, material in enumerate(gltf.materials):
         if material.pbrMetallicRoughness is None:
@@ -110,7 +172,6 @@ def attach_fallback_texture(glb_path, texture_path, work_dir):
     if fallback_material_index is None:
         fallback_material_index = 0
 
-    # Qualquer primitive sem material nenhum recebe o material com a textura nova
     for mesh in gltf.meshes:
         for primitive in mesh.primitives:
             if primitive.material is None:
@@ -123,26 +184,65 @@ def attach_fallback_texture(glb_path, texture_path, work_dir):
     return output_path
 
 
-def convert_to_glb(mesh_path, work_dir):
-    """Usa o assimp pra converter qualquer formato suportado em um único .glb
-    com as texturas embutidas. Se já for .glb, não faz nada."""
-    ext = os.path.splitext(mesh_path)[1].lower()
-    if ext == ".glb":
-        return mesh_path
+def _compute_bounding_box(gltf):
+    """Bounding box aproximado a partir dos accessors POSITION de todas as
+    meshes. Não considera transforms de nós aninhados — funciona bem pra
+    props/personagens simples (a maioria dos modelos baixados prontos),
+    mas pode não ser perfeito em rigs muito complexos com vários ossos."""
+    mins, maxs = [], []
+    for mesh in gltf.meshes:
+        for prim in mesh.primitives:
+            pos_idx = getattr(prim.attributes, "POSITION", None)
+            if pos_idx is None:
+                continue
+            accessor = gltf.accessors[pos_idx]
+            if accessor.min and accessor.max:
+                mins.append(accessor.min)
+                maxs.append(accessor.max)
+    if not mins:
+        return None
+    overall_min = [min(v[i] for v in mins) for i in range(3)]
+    overall_max = [max(v[i] for v in maxs) for i in range(3)]
+    return overall_min, overall_max
 
-    output_path = os.path.join(work_dir, "converted.glb")
-    result = subprocess.run(
-        ["assimp", "export", mesh_path, output_path],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if result.returncode != 0 or not os.path.exists(output_path):
-        raise RuntimeError(
-            "Não consegui converter esse arquivo pra .glb. "
-            f"Detalhe técnico: {result.stderr.strip()[-500:]}"
-        )
-    return output_path
+
+def normalize_scale(glb_path, target_size, work_dir):
+    """Escala o modelo todo (via o transform dos nós-raiz da cena, sem tocar
+    na geometria) pra que o lado maior do bounding box vire `target_size`
+    studs. Isso resolve a inconsistência de tamanho entre fontes diferentes
+    (uma exporta em metros, outra em centímetros, outra em unidades
+    arbitrárias) sem precisar editar vértice por vértice."""
+    gltf = GLTF2().load_binary(glb_path)
+
+    bbox = _compute_bounding_box(gltf)
+    if not bbox or not gltf.scenes:
+        return None, None
+
+    bmin, bmax = bbox
+    largest = max(bmax[i] - bmin[i] for i in range(3))
+    if largest <= 0:
+        return None, None
+
+    factor = target_size / largest
+
+    scene_idx = gltf.scene if gltf.scene is not None else 0
+    root_indices = gltf.scenes[scene_idx].nodes or []
+    if not root_indices:
+        return None, None
+
+    for idx in root_indices:
+        node = gltf.nodes[idx]
+        if node.matrix:
+            # Pré-multiplica por uma escala uniforme: todo o bloco 3x4
+            # (rotação/escala + translação) escala junto, w (índice 15) fica em 1.
+            node.matrix = [v * factor if i != 15 else v for i, v in enumerate(node.matrix)]
+        else:
+            base_scale = node.scale if node.scale else [1.0, 1.0, 1.0]
+            node.scale = [base_scale[i] * factor for i in range(3)]
+
+    output_path = os.path.join(work_dir, "scaled.glb")
+    gltf.save_binary(output_path)
+    return output_path, factor
 
 
 def upload_to_roblox(glb_path, display_name, description):
@@ -174,7 +274,6 @@ def upload_to_roblox(glb_path, display_name, description):
     if not operation_id:
         raise RuntimeError(f"Resposta inesperada da Roblox: {resp.text[:500]}")
 
-    # Faz polling até a moderação terminar (timeout total ~2 minutos)
     for _ in range(40):
         time.sleep(3)
         op_resp = requests.get(
@@ -192,8 +291,8 @@ def upload_to_roblox(glb_path, display_name, description):
     raise RuntimeError("Deu timeout esperando a moderação da Roblox responder. Tente checar seu Inventário em alguns minutos.")
 
 
-def process_job(job_id, saved_path, display_name, description, texture_path=None):
-    """Roda em background: extrai/converte/envia, e guarda o resultado em JOBS."""
+def process_job(job_id, saved_path, display_name, description, texture_path, target_size):
+    """Roda em background: extrai/converte/normaliza/envia, guarda o resultado em JOBS."""
     try:
         with tempfile.TemporaryDirectory() as work_dir:
             mesh_path = saved_path
@@ -216,16 +315,31 @@ def process_job(job_id, saved_path, display_name, description, texture_path=None
             if ext not in MESH_EXTENSIONS:
                 raise RuntimeError(f"Formato '{ext}' não é um modelo 3D suportado.")
 
-            glb_path = convert_to_glb(mesh_path, work_dir)
+            warnings = []
 
-            warning = None
+            glb_path, convert_warning = convert_to_glb(mesh_path, work_dir)
+            if convert_warning:
+                warnings.append(convert_warning)
+
             if texture_path:
                 try:
                     glb_path = attach_fallback_texture(glb_path, texture_path, work_dir)
                 except Exception as exc:  # noqa: BLE001
-                    # Se a injeção da textura falhar, não aborta o upload —
-                    # sobe sem a textura e avisa o motivo.
-                    warning = f"Não consegui aplicar a textura manual ({exc}); o modelo subiu sem ela."
+                    warnings.append(f"Não consegui aplicar a textura manual ({exc}); o modelo subiu sem ela.")
+
+            diag = diagnose_missing_texture(glb_path, manual_texture_provided=bool(texture_path))
+            if diag:
+                warnings.append(diag)
+
+            if target_size:
+                try:
+                    scaled_path, _factor = normalize_scale(glb_path, target_size, work_dir)
+                    if scaled_path:
+                        glb_path = scaled_path
+                    else:
+                        warnings.append("Não consegui medir o tamanho desse modelo pra padronizar; subiu no tamanho original.")
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Não consegui padronizar o tamanho automaticamente ({exc}); subiu no tamanho original.")
 
             asset_id = upload_to_roblox(glb_path, display_name, description)
 
@@ -234,8 +348,8 @@ def process_job(job_id, saved_path, display_name, description, texture_path=None
                 "assetId": asset_id,
                 "inventoryUrl": "https://www.roblox.com/users/inventory/#!/3d-model",
             }
-            if warning:
-                result["warning"] = warning
+            if warnings:
+                result["warnings"] = warnings
             JOBS[job_id] = result
     except Exception as exc:  # noqa: BLE001
         JOBS[job_id] = {"status": "error", "error": str(exc)}
@@ -272,6 +386,12 @@ def upload():
     display_name = request.form.get("displayName", "").strip() or os.path.splitext(uploaded.filename)[0]
     description = request.form.get("description", "").strip()
 
+    try:
+        target_size = float(request.form.get("targetSize", DEFAULT_TARGET_SIZE))
+    except (TypeError, ValueError):
+        target_size = DEFAULT_TARGET_SIZE
+    target_size = max(0.1, min(target_size, 500))
+
     upload_dir = tempfile.mkdtemp(prefix="upload_")
     saved_path = os.path.join(upload_dir, uploaded.filename)
     uploaded.save(saved_path)
@@ -295,7 +415,7 @@ def upload():
 
     thread = threading.Thread(
         target=process_job,
-        args=(job_id, saved_path, display_name, description, texture_path),
+        args=(job_id, saved_path, display_name, description, texture_path, target_size),
         daemon=True,
     )
     thread.start()

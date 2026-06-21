@@ -89,6 +89,54 @@ a que tiver "diffuse", "albedo", "basecolor" ou "color" no nome — é a única
 que a Roblox MeshPart realmente usa (não há suporte completo a PBR nesse
 fluxo de upload).
 
+## Modelo `.glb` que mostra textura na fonte, mas sobe sem cor
+
+Mesmo um `.glb` "pronto" pode chegar sem textura na Roblox por causa de
+formatos internos que a Roblox (e o conversor) não leem:
+
+- **Compressão Draco** na geometria (`KHR_draco_mesh_compression`) — comum
+  em downloads "otimizados" do Sketchfab.
+- **Texturas Basis Universal/KTX2** (`KHR_texture_basisu`) — formato de
+  textura comprimida que poucas ferramentas leem fora de engines como
+  Unity/Unreal.
+- Materiais definidos via `KHR_materials_pbrSpecularGlossiness` ou
+  `KHR_materials_unlit`, em vez do padrão `pbrMetallicRoughness` que a
+  Roblox espera.
+
+Agora o site **sempre reprocessa** o `.glb` recebido (mesmo já sendo
+`.glb`) tentando normalizar esses formatos, e se mesmo assim não sobrar
+nenhuma imagem embutida, ele te avisa qual desses motivos é o mais provável
+direto na tela de resultado — assim você sabe se vale a pena procurar outra
+versão do modelo ou só anexar a textura manualmente.
+
+## Tamanho inconsistente entre modelos
+
+A Roblox não converte unidades — ela importa os números de posição do
+arquivo **diretamente como studs**. Um modelo exportado em metros (altura
+1.7) e outro em centímetros (altura 170) saem em escalas completamente
+diferentes na Roblox, mesmo sendo "corretos" nos próprios formatos.
+
+O site agora **padroniza automaticamente** o tamanho de todo modelo
+enviado: ele calcula o lado maior do modelo e aplica uma escala uniforme
+(via o transform da cena, sem editar a malha) pra esse lado bater com o
+valor que você define no campo **"Tamanho"** (padrão: 6 studs, ~escala de
+personagem). Ajuste esse número conforme o tipo de objeto — uma espada pode
+pedir um valor menor, um prédio um valor bem maior.
+
+Essa medição usa o bounding box da geometria sem considerar transforms
+aninhados complexos — funciona bem pra props e personagens simples (a
+maioria dos modelos prontos pra baixar), mas pode não ser perfeita em rigs
+com múltiplos ossos/armaduras aninhadas.
+
+## Modelo vem "em partes"
+
+Isso normalmente não é um bug: a maioria dos modelos de personagens/objetos
+complexos tem várias partes com materiais diferentes (ex: corpo, roupa,
+cabelo, acessórios), e cada parte vira um `MeshPart` dentro do mesmo
+`Model`/pacote da Roblox — ainda assim conta como **um único item** no seu
+inventário e se move junto. Forçar tudo a virar uma única peça quebraria as
+texturas diferentes de cada parte, então o site não faz isso de propósito.
+
 ## Limites importantes da Roblox (Open Cloud)
 
 - Até **20 MB** por arquivo.
