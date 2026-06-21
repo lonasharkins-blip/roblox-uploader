@@ -21,16 +21,37 @@
     --warn-bg: #fbf6e8;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
+  html[data-theme="dark"] {
+    --bg: #121212;
+    --text: #f0f0f0;
+    --muted: #9a9a9a;
+    --border: #3a3a3a;
+    --border-focus: #f0f0f0;
+    --accent: #f0f0f0;
+    --accent-text: #121212;
+    --ok: #6fd19a;
+    --ok-bg: #16261d;
+    --error: #ff8b8b;
+    --error-bg: #2a1717;
+    --warn: #e0c14a;
+    --warn-bg: #2a2414;
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
+    transition: background 0.15s, color 0.15s;
   }
   .page { max-width: 420px; margin: 0 auto; padding: 32px 20px 60px; }
 
-  h1 { font-size: 18px; font-weight: 600; margin: 0 0 24px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  #themeToggle {
+    width: auto; margin: 0; padding: 6px 10px; font-size: 12px; font-weight: 500;
+    background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
+  }
 
   fieldset { border: none; padding: 0; margin: 0 0 18px; }
   label {
@@ -72,6 +93,12 @@
 
   .help { font-size: 12px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
 
+  .checkbox-label {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; color: var(--text); margin-bottom: 0; cursor: pointer;
+  }
+  .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
   button {
     width: 100%;
     padding: 12px;
@@ -105,7 +132,7 @@
 
   .history-row {
     display: flex; justify-content: space-between; gap: 10px;
-    font-size: 13px; padding: 7px 0; border-bottom: 1px solid #f0f0f0;
+    font-size: 13px; padding: 7px 0; border-bottom: 1px solid var(--border);
   }
   .history-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .history-row .status-ok { color: var(--ok); }
@@ -115,7 +142,10 @@
 </head>
 <body>
 <div class="page">
-  <h1>Upload pra Roblox</h1>
+  <div class="topbar">
+    <h1>Upload pra Roblox</h1>
+    <button id="themeToggle" type="button">Escuro</button>
+  </div>
 
   <fieldset>
     <label for="secret">Senha</label>
@@ -144,6 +174,14 @@
     <div class="help">Padroniza o tamanho de todo modelo enviado. 6 ≈ escala de personagem.</div>
   </fieldset>
 
+  <fieldset class="checkbox-field">
+    <label class="checkbox-label">
+      <input type="checkbox" id="mergeParts" checked />
+      Combinar peças separadas
+    </label>
+    <div class="help">Corrige peças (ex: lâmina + bainha) que vinham desencontradas ao importar uma por uma. Desative só se quiser as partes soltas de propósito.</div>
+  </fieldset>
+
   <fieldset>
     <div class="row-2">
       <div>
@@ -166,6 +204,24 @@
 </div>
 
 <script>
+  const themeToggle = document.getElementById('themeToggle');
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    themeToggle.textContent = theme === 'dark' ? 'Claro' : 'Escuro';
+  }
+
+  const savedTheme = localStorage.getItem('roblox_uploader_theme');
+  const systemPrefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(savedTheme || (systemPrefersDark ? 'dark' : 'light'));
+
+  themeToggle.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    localStorage.setItem('roblox_uploader_theme', next);
+  });
+
   const secretInput = document.getElementById('secret');
   const fileInput = document.getElementById('file');
   const textureInput = document.getElementById('texture');
@@ -267,6 +323,7 @@
     formData.append('file', fileInput.files[0]);
     if (textureInput.files.length) formData.append('texture', textureInput.files[0]);
     formData.append('targetSize', document.getElementById('targetSize').value);
+    formData.append('mergeParts', document.getElementById('mergeParts').checked ? 'true' : 'false');
     formData.append('displayName', document.getElementById('displayName').value);
     formData.append('description', document.getElementById('description').value);
 
