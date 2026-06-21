@@ -128,14 +128,33 @@ aninhados complexos — funciona bem pra props e personagens simples (a
 maioria dos modelos prontos pra baixar), mas pode não ser perfeita em rigs
 com múltiplos ossos/armaduras aninhadas.
 
-## Modelo vem "em partes"
+## Peças vêm desencontradas (ex: lâmina e bainha "uma dentro da outra")
 
-Isso normalmente não é um bug: a maioria dos modelos de personagens/objetos
-complexos tem várias partes com materiais diferentes (ex: corpo, roupa,
-cabelo, acessórios), e cada parte vira um `MeshPart` dentro do mesmo
-`Model`/pacote da Roblox — ainda assim conta como **um único item** no seu
-inventário e se move junto. Forçar tudo a virar uma única peça quebraria as
-texturas diferentes de cada parte, então o site não faz isso de propósito.
+Esse é um problema diferente do de textura: é sobre **posição relativa**.
+Quando um modelo tem várias partes (lâmina + bainha, corpo + roupa, etc.) e
+você importa cada peça separadamente por ID — porque sem o Studio não dá
+pra inserir o "Model" inteiro já montado — cada peça normalmente entra
+zerada (`CFrame` na origem), porque a posição relativa entre elas ficava
+guardada na hierarquia de nós do arquivo, não na peça em si.
+
+Agora tem um campo **"Combinar peças separadas"** (ativado por padrão) que
+resolve isso de um jeito mais robusto: em vez de depender da hierarquia, o
+site "assa" a posição de cada peça **direto nos vértices**, todas no mesmo
+sistema de coordenadas. Assim, mesmo importando cada peça individualmente
+por ID, elas já chegam no lugar certo uma em relação à outra — porque a
+posição já está embutida na própria geometria, não depende mais de nenhum
+transform externo.
+
+Detalhe técnico (pra quem quiser entender o "por quê"): isso usa o
+pós-processamento `PreTransformVertices` do `assimp` via a flag `-ptv`.
+**Não tive como testar essa flag específica num ambiente real antes de
+entregar** — se por algum motivo a sintaxe estiver errada, o site
+simplesmente cai de volta pro comportamento de antes (peças soltas, sem
+quebrar nada) e mostra um aviso na tela. Testa com um modelo de várias
+partes e me conta o resultado.
+
+Se algum dia você quiser as partes propositalmente separadas (sem fundir),
+desmarque essa opção antes de enviar.
 
 ## Limites importantes da Roblox (Open Cloud)
 

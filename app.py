@@ -59,14 +59,24 @@ def find_main_mesh_file(folder):
 
 
 def convert_to_glb(mesh_path, work_dir):
-    """Usa o assimp pra (re)exportar o modelo como um único .glb autocontido.
+    """Converte qualquer formato suportado num único .glb autocontido.
 
-    Mesmo arquivos que já SÃO .glb passam por aqui de propósito: isso ajuda a
-    normalizar formatos de textura/compressão que a fonte original usa sem
-    avisar (ex: compressão Draco na malha, texturas Basis Universal/KTX2) e
-    que a Roblox não entende. Se a reconversão falhar, cai de volta pro
-    arquivo original sem alterações, em vez de travar o upload.
+    Se o arquivo já for .glb e já tiver pelo menos uma imagem embutida, ele é
+    usado exatamente como está. Reprocessar pelo assimp um .glb que já
+    funciona pode, em modelos com várias partes/ossos, embaralhar a posição
+    relativa das peças — então só vale arriscar isso quando o arquivo já
+    está com problema (sem nenhuma textura) de qualquer forma.
     """
+    ext = os.path.splitext(mesh_path)[1].lower()
+
+    if ext == ".glb":
+        try:
+            existing = GLTF2().load_binary(mesh_path)
+            if existing.images:
+                return mesh_path, None
+        except Exception:
+            pass  # se não conseguir nem ler, tenta reprocessar abaixo
+
     output_path = os.path.join(work_dir, "converted.glb")
     result = subprocess.run(
         ["assimp", "export", mesh_path, output_path],
@@ -76,9 +86,15 @@ def convert_to_glb(mesh_path, work_dir):
     )
 
     if result.returncode == 0 and os.path.exists(output_path):
-        return output_path, None
+        warning = None
+        if ext == ".glb":
+            warning = (
+                "Esse .glb não tinha textura embutida, então reprocessei pra tentar "
+                "recuperar — em modelos com várias partes isso pode (raramente) deixar "
+                "alguma peça fora do lugar. Se acontecer, me avisa."
+            )
+        return output_path, warning
 
-    ext = os.path.splitext(mesh_path)[1].lower()
     if ext == ".glb":
         return mesh_path, (
             "Não consegui reprocessar esse .glb pra normalizar formato/compressão "
@@ -245,6 +261,30 @@ def normalize_scale(glb_path, target_size, work_dir):
     return output_path, factor
 
 
+def merge_parts(glb_path, work_dir):
+    """'Assa' a posição de cada peça/nó diretamente nos vértices e reduz a
+    cena a um conjunto mínimo de meshes (via o pós-processamento
+    PreTransformVertices do assimp). Resolve o caso de modelos com várias
+    partes separadas (ex: lâmina + bainha) que vinham desencontradas quando
+    cada peça era importada individualmente por ID na Roblox — depois disso,
+    a posição relativa correta já está embutida na geometria de cada peça,
+    então não depende mais de hierarquia/transform externos pra se montar.
+    """
+    output_path = os.path.join(work_dir, "merged.glb")
+    result = subprocess.run(
+        ["assimp", "export", glb_path, output_path, "-ptv"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode == 0 and os.path.exists(output_path):
+        return output_path, None
+    return glb_path, (
+        "Não consegui combinar a posição das peças automaticamente (continua "
+        "como antes — pode precisar reposicionar manualmente)."
+    )
+
+
 def upload_to_roblox(glb_path, display_name, description):
     """Sobe o .glb pra Roblox via Open Cloud Assets API e espera a moderação."""
     request_payload = {
@@ -291,7 +331,7 @@ def upload_to_roblox(glb_path, display_name, description):
     raise RuntimeError("Deu timeout esperando a moderação da Roblox responder. Tente checar seu Inventário em alguns minutos.")
 
 
-def process_job(job_id, saved_path, display_name, description, texture_path, target_size):
+def process_job(job_id, saved_path, display_name, description, texture_path, target_size, merge_enabled):
     """Roda em background: extrai/converte/normaliza/envia, guarda o resultado em JOBS."""
     try:
         with tempfile.TemporaryDirectory() as work_dir:
@@ -330,6 +370,11 @@ def process_job(job_id, saved_path, display_name, description, texture_path, tar
             diag = diagnose_missing_texture(glb_path, manual_texture_provided=bool(texture_path))
             if diag:
                 warnings.append(diag)
+
+            if merge_enabled:
+                glb_path, merge_warning = merge_parts(glb_path, work_dir)
+                if merge_warning:
+                    warnings.append(merge_warning)
 
             if target_size:
                 try:
@@ -392,6 +437,8 @@ def upload():
         target_size = DEFAULT_TARGET_SIZE
     target_size = max(0.1, min(target_size, 500))
 
+    merge_enabled = request.form.get("mergeParts", "true").strip().lower() != "false"
+
     upload_dir = tempfile.mkdtemp(prefix="upload_")
     saved_path = os.path.join(upload_dir, uploaded.filename)
     uploaded.save(saved_path)
@@ -415,7 +462,7 @@ def upload():
 
     thread = threading.Thread(
         target=process_job,
-        args=(job_id, saved_path, display_name, description, texture_path, target_size),
+        args=(job_id, saved_path, display_name, description, texture_path, target_size, merge_enabled),
         daemon=True,
     )
     thread.start()
