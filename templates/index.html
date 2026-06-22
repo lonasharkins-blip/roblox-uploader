@@ -96,6 +96,14 @@
 
   .help { font-size: 12px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
 
+  .rotate-panel {
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    padding: 10px 12px 12px;
+  }
+  .rotate-panel .help { margin-top: 8px; margin-bottom: 0; }
+
   .checkbox-label {
     display: flex; align-items: center; gap: 8px;
     font-size: 14px; color: var(--text); margin-bottom: 0; cursor: pointer;
@@ -161,8 +169,22 @@
       <input type="file" id="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.ply,.zip" />
       <span id="dropLabel">Escolher arquivo (.glb, .obj, .fbx, .zip…)</span>
     </label>
-    <model-viewer id="modelPreview" camera-controls style="display:none; width:100%; height:260px; margin-top:10px; border:1px solid var(--border); border-radius:6px; background:var(--bg);"></model-viewer>
-    <div class="help" id="previewHint" style="display:none;">Arraste pra girar a câmera e olhar de todo ângulo. A rotação abaixo já reflete aqui.</div>
+    <model-viewer id="modelPreview" camera-controls style="display:none; width:100%; height:260px; margin-top:10px; border:1px solid var(--border); border-radius:6px 6px 0 0; background:var(--bg);"></model-viewer>
+    <div class="rotate-panel" id="rotatePanel" style="display:none;">
+      <div class="row-3">
+        <div>
+          <input type="number" id="rotateX" value="0" step="5" placeholder="X" />
+        </div>
+        <div>
+          <input type="number" id="rotateY" value="0" step="5" placeholder="Y" />
+        </div>
+        <div>
+          <input type="number" id="rotateZ" value="0" step="5" placeholder="Z" />
+        </div>
+      </div>
+      <div class="help">Rotação em graus (X/Y/Z) pra corrigir a orientação — gira o modelo aí em cima conforme você digita.</div>
+    </div>
+    <div class="help" id="previewHint" style="display:none;">Arraste pra girar a câmera e olhar de todo ângulo.</div>
   </fieldset>
 
   <fieldset>
@@ -187,21 +209,6 @@
     <div class="help">Corrige peças (ex: lâmina + bainha) que vinham desencontradas ao importar uma por uma. Desative só se quiser as partes soltas de propósito.</div>
   </fieldset>
 
-  <fieldset>
-    <label>Rotação pra corrigir orientação (graus)</label>
-    <div class="row-3">
-      <div>
-        <input type="number" id="rotateX" value="0" step="5" placeholder="X" />
-      </div>
-      <div>
-        <input type="number" id="rotateY" value="0" step="5" placeholder="Y" />
-      </div>
-      <div>
-        <input type="number" id="rotateZ" value="0" step="5" placeholder="Z" />
-      </div>
-    </div>
-    <div class="help">Deixe 0/0/0 se o modelo já chega na posição certa. Pra deixar algo "deitado" que vem na diagonal, teste valores em Z (ou X) — vai ser por tentativa, ajuste e envie de novo até encaixar.</div>
-  </fieldset>
 
   <fieldset>
     <div class="row-2">
@@ -255,6 +262,7 @@
   const historyList = document.getElementById('historyList');
   const modelPreview = document.getElementById('modelPreview');
   const previewHint = document.getElementById('previewHint');
+  const rotatePanel = document.getElementById('rotatePanel');
   const rotateXInput = document.getElementById('rotateX');
   const rotateYInput = document.getElementById('rotateY');
   const rotateZInput = document.getElementById('rotateZ');
@@ -272,7 +280,11 @@
     const y = parseFloat(rotateYInput.value) || 0; // eixo Y -> yaw
     const z = parseFloat(rotateZInput.value) || 0; // eixo Z -> roll
     // model-viewer espera "roll pitch yaw"
-    modelPreview.setAttribute('orientation', `${z}deg ${x}deg ${y}deg`);
+    modelPreview.orientation = `${z}deg ${x}deg ${y}deg`;
+    // setar só a property às vezes não força redesenhar na hora — isso garante o redraw imediato
+    if (typeof modelPreview.updateFraming === 'function') {
+      modelPreview.updateFraming();
+    }
   }
 
   fileInput.addEventListener('change', () => {
@@ -288,10 +300,12 @@
       modelPreview.src = previewObjectUrl;
       modelPreview.style.display = 'block';
       previewHint.style.display = 'block';
+      rotatePanel.style.display = 'block';
       updatePreviewOrientation();
     } else {
       modelPreview.style.display = 'none';
       previewHint.style.display = 'none';
+      rotatePanel.style.display = 'none';
     }
   });
 
