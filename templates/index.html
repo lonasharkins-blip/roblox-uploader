@@ -250,6 +250,14 @@
     <div class="help">Tenta deixar o modelo com 1 mesh + 1 textura só (em vez de uma por peça), já que a Roblox só aceita 1 textura por MeshPart. Pode perder um pouco de qualidade de imagem e ainda não testei isso contra a Roblox real — comece desligado, ative só se quiser tentar.</div>
   </fieldset>
 
+  <fieldset class="checkbox-field">
+    <label class="checkbox-label">
+      <input type="checkbox" id="autoOrient" checked />
+      Auto-orientar "de pé" (experimental)
+    </label>
+    <div class="help">Gira automaticamente 90° pra alinhar o lado mais longo do modelo com a vertical. Funciona bem pra objetos alongados (espada, pessoa); pode errar em objetos largos/baixos de propósito (escudo, mesa). Só age se os campos de rotação abaixo estiverem em 0/0/0 — preencher algum ali desliga isso automaticamente.</div>
+  </fieldset>
+
   <fieldset>
     <label for="updateAssetId">Asset ID pra atualizar (opcional)</label>
     <input type="text" id="updateAssetId" placeholder="Deixe em branco pra criar um novo" inputmode="numeric" />
@@ -531,6 +539,7 @@
     formData.append('targetSize', document.getElementById('targetSize').value);
     formData.append('mergeParts', document.getElementById('mergeParts').checked ? 'true' : 'false');
     formData.append('bakeAtlas', document.getElementById('bakeAtlas').checked ? 'true' : 'false');
+    formData.append('autoOrient', document.getElementById('autoOrient').checked ? 'true' : 'false');
     formData.append('updateAssetId', document.getElementById('updateAssetId').value.trim());
     formData.append('rotateX', document.getElementById('rotateX').value || '0');
     formData.append('rotateY', document.getElementById('rotateY').value || '0');
