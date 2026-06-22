@@ -110,6 +110,18 @@
   }
   .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
+  .quick-rotate-row { display: flex; gap: 6px; margin-top: 8px; }
+  .chip-btn {
+    width: auto; flex: 1; margin-top: 0; padding: 7px 4px;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;
+  }
+  .secondary-btn {
+    width: 100%; margin-top: 10px; padding: 9px;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+
   button {
     width: 100%;
     padding: 12px;
@@ -142,12 +154,25 @@
   hr { border: none; border-top: 1px solid var(--border); margin: 28px 0 18px; }
 
   .history-row {
-    display: flex; justify-content: space-between; gap: 10px;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
     font-size: 13px; padding: 7px 0; border-bottom: 1px solid var(--border);
   }
+  .history-row .thumb {
+    width: 32px; height: 32px; border-radius: 4px; object-fit: cover;
+    border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
+  }
+  .history-row .thumb-placeholder {
+    width: 32px; height: 32px; border-radius: 4px; flex-shrink: 0;
+    border: 1px solid var(--border); background: var(--bg);
+  }
+  .history-row .info { display: flex; align-items: center; gap: 8px; overflow: hidden; flex: 1; }
   .history-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .history-row .status-ok { color: var(--ok); }
   .history-row .status-err { color: var(--error); }
+  .history-row .remove-btn {
+    width: auto; margin: 0; padding: 2px 7px; background: none; border: none;
+    color: var(--muted); font-size: 15px; cursor: pointer; flex-shrink: 0;
+  }
   .empty-history { color: var(--muted); font-size: 13px; }
 </style>
 </head>
@@ -166,9 +191,10 @@
   <fieldset>
     <label for="file">Modelo 3D</label>
     <label class="file-input" id="dropArea">
-      <input type="file" id="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.ply,.zip" />
-      <span id="dropLabel">Escolher arquivo (.glb, .obj, .fbx, .zip…)</span>
+      <input type="file" id="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.ply,.zip" multiple />
+      <span id="dropLabel">Escolher arquivo(s) (.glb, .obj, .fbx, .zip…)</span>
     </label>
+    <div class="help" id="multiFileHint" style="display:none;"></div>
     <model-viewer id="modelPreview" camera-controls style="display:none; width:100%; height:260px; margin-top:10px; border:1px solid var(--border); border-radius:6px 6px 0 0; background:var(--bg);"></model-viewer>
     <div class="rotate-panel" id="rotatePanel" style="display:none;">
       <div class="row-3">
@@ -182,7 +208,14 @@
           <input type="number" id="rotateZ" value="0" step="5" placeholder="Z" />
         </div>
       </div>
+      <div class="quick-rotate-row">
+        <button type="button" class="chip-btn" data-axis="x">+90° X</button>
+        <button type="button" class="chip-btn" data-axis="y">+90° Y</button>
+        <button type="button" class="chip-btn" data-axis="z">+90° Z</button>
+        <button type="button" class="chip-btn" id="resetRotation">Zerar</button>
+      </div>
       <div class="help">Rotação em graus (X/Y/Z) pra corrigir a orientação — gira o modelo aí em cima conforme você digita.</div>
+      <button type="button" id="downloadPreviewBtn" class="secondary-btn">Baixar imagem do visualizador</button>
     </div>
     <div class="help" id="previewHint" style="display:none;">Arraste pra girar a câmera e olhar de todo ângulo.</div>
   </fieldset>
@@ -209,6 +242,20 @@
     <div class="help">Corrige peças (ex: lâmina + bainha) que vinham desencontradas ao importar uma por uma. Desative só se quiser as partes soltas de propósito.</div>
   </fieldset>
 
+  <fieldset class="checkbox-field">
+    <label class="checkbox-label">
+      <input type="checkbox" id="bakeAtlas" />
+      Combinar texturas em 1 atlas (experimental)
+    </label>
+    <div class="help">Tenta deixar o modelo com 1 mesh + 1 textura só (em vez de uma por peça), já que a Roblox só aceita 1 textura por MeshPart. Pode perder um pouco de qualidade de imagem e ainda não testei isso contra a Roblox real — comece desligado, ative só se quiser tentar.</div>
+  </fieldset>
+
+  <fieldset>
+    <label for="updateAssetId">Asset ID pra atualizar (opcional)</label>
+    <input type="text" id="updateAssetId" placeholder="Deixe em branco pra criar um novo" inputmode="numeric" />
+    <div class="help">Se preencher, atualiza o conteúdo desse asset (nova versão) em vez de criar um novo. Recurso beta da própria Roblox — só funciona pra assets do tipo Model.</div>
+  </fieldset>
+
 
   <fieldset>
     <div class="row-2">
@@ -228,6 +275,7 @@
   <div class="status" id="statusBox"></div>
 
   <hr>
+  <div class="help" style="margin-bottom:8px;">O × remove só dessa lista local — a Roblox não tem uma forma de apagar o asset por API; pra isso, use o Creator Dashboard direto no site da Roblox.</div>
   <div id="historyList"></div>
 </div>
 
@@ -257,6 +305,7 @@
   const dropAreaTex = document.getElementById('dropAreaTex');
   const dropLabel = document.getElementById('dropLabel');
   const dropLabelTex = document.getElementById('dropLabelTex');
+  const multiFileHint = document.getElementById('multiFileHint');
   const submitBtn = document.getElementById('submitBtn');
   const statusBox = document.getElementById('statusBox');
   const historyList = document.getElementById('historyList');
@@ -266,6 +315,7 @@
   const rotateXInput = document.getElementById('rotateX');
   const rotateYInput = document.getElementById('rotateY');
   const rotateZInput = document.getElementById('rotateZ');
+  const downloadPreviewBtn = document.getElementById('downloadPreviewBtn');
 
   let previewObjectUrl = null;
   let framingTimeout = null;
@@ -299,14 +349,22 @@
 
   fileInput.addEventListener('change', () => {
     if (!fileInput.files.length) return;
-    const file = fileInput.files[0];
-    dropLabel.textContent = file.name;
+    const files = Array.from(fileInput.files);
+
+    if (files.length === 1) {
+      dropLabel.textContent = files[0].name;
+      multiFileHint.style.display = 'none';
+    } else {
+      dropLabel.textContent = `${files.length} arquivos selecionados`;
+      multiFileHint.textContent = `Esses ${files.length} arquivos vão ser combinados num único modelo final.`;
+      multiFileHint.style.display = 'block';
+    }
     dropArea.classList.add('has-file');
 
-    const ext = file.name.toLowerCase().split('.').pop();
-    if (ext === 'glb' || ext === 'gltf') {
+    const ext = files[0].name.toLowerCase().split('.').pop();
+    if (files.length === 1 && (ext === 'glb' || ext === 'gltf')) {
       if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
-      previewObjectUrl = URL.createObjectURL(file);
+      previewObjectUrl = URL.createObjectURL(files[0]);
       modelPreview.src = previewObjectUrl;
       modelPreview.style.display = 'block';
       previewHint.style.display = 'block';
@@ -316,6 +374,41 @@
       modelPreview.style.display = 'none';
       previewHint.style.display = 'none';
       rotatePanel.style.display = 'none';
+    }
+  });
+
+  document.querySelectorAll('.chip-btn[data-axis]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const axis = btn.dataset.axis;
+      const input = axis === 'x' ? rotateXInput : (axis === 'y' ? rotateYInput : rotateZInput);
+      let val = (parseFloat(input.value) || 0) + 90;
+      if (val >= 360) val -= 360;
+      input.value = val;
+      updatePreviewOrientation();
+    });
+  });
+
+  document.getElementById('resetRotation').addEventListener('click', () => {
+    rotateXInput.value = 0;
+    rotateYInput.value = 0;
+    rotateZInput.value = 0;
+    updatePreviewOrientation();
+  });
+
+  downloadPreviewBtn.addEventListener('click', async () => {
+    if (modelPreview.style.display === 'none' || typeof modelPreview.toBlob !== 'function') return;
+    try {
+      const blob = await modelPreview.toBlob({ mimeType: 'image/png', idealAspect: true });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'preview.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setStatus('error', 'Não consegui gerar a imagem do visualizador.');
     }
   });
 
@@ -330,18 +423,52 @@
     }
   });
 
+  async function captureThumbnail() {
+    if (modelPreview.style.display === 'none' || typeof modelPreview.toBlob !== 'function') return null;
+    try {
+      const blob = await modelPreview.toBlob({ mimeType: 'image/jpeg', qualityArgument: 0.6 });
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      const side = Math.min(bitmap.width, bitmap.height);
+      const sx = (bitmap.width - side) / 2;
+      const sy = (bitmap.height - side) / 2;
+      ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, 64, 64);
+      return canvas.toDataURL('image/jpeg', 0.7);
+    } catch (e) {
+      return null;
+    }
+  }
+
   function loadHistory() {
     const items = JSON.parse(localStorage.getItem('rbx_history') || '[]');
     if (!items.length) {
       historyList.innerHTML = '<div class="empty-history">Nenhum upload ainda.</div>';
       return;
     }
-    historyList.innerHTML = items.map(it => `
+    historyList.innerHTML = items.map((it, idx) => `
       <div class="history-row">
-        <span class="name">${it.name}</span>
+        <div class="info">
+          ${it.thumb ? `<img class="thumb" src="${it.thumb}" alt="" />` : '<div class="thumb-placeholder"></div>'}
+          <span class="name">${it.name}</span>
+        </div>
         <span class="${it.ok ? 'status-ok' : 'status-err'}">${it.ok ? '#' + it.assetId : 'falhou'}</span>
+        <button type="button" class="remove-btn" data-idx="${idx}" title="Remover da lista">×</button>
       </div>
     `).join('');
+
+    historyList.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', () => removeHistoryItem(parseInt(btn.dataset.idx, 10)));
+    });
+  }
+
+  function removeHistoryItem(idx) {
+    const items = JSON.parse(localStorage.getItem('rbx_history') || '[]');
+    items.splice(idx, 1);
+    localStorage.setItem('rbx_history', JSON.stringify(items));
+    loadHistory();
   }
 
   function pushHistory(entry) {
@@ -372,7 +499,8 @@
           data.warnings.forEach(w => { html += `<span class="warning-line">${w}</span>`; });
         }
         setStatus('done', html);
-        pushHistory({ name: modelName, ok: true, assetId: data.assetId });
+        const thumb = await captureThumbnail();
+        pushHistory({ name: modelName, ok: true, assetId: data.assetId, thumb });
         submitBtn.disabled = false;
         submitBtn.textContent = 'Enviar';
       } else if (data.status === 'error') {
@@ -398,10 +526,12 @@
 
     const formData = new FormData();
     formData.append('secret', secretInput.value);
-    formData.append('file', fileInput.files[0]);
+    Array.from(fileInput.files).forEach(f => formData.append('file', f));
     if (textureInput.files.length) formData.append('texture', textureInput.files[0]);
     formData.append('targetSize', document.getElementById('targetSize').value);
     formData.append('mergeParts', document.getElementById('mergeParts').checked ? 'true' : 'false');
+    formData.append('bakeAtlas', document.getElementById('bakeAtlas').checked ? 'true' : 'false');
+    formData.append('updateAssetId', document.getElementById('updateAssetId').value.trim());
     formData.append('rotateX', document.getElementById('rotateX').value || '0');
     formData.append('rotateY', document.getElementById('rotateY').value || '0');
     formData.append('rotateZ', document.getElementById('rotateZ').value || '0');
