@@ -180,3 +180,67 @@ desmarque essa opção antes de enviar.
   simples (`APP_SECRET`). Se quiser permitir outras pessoas usarem com as
   próprias contas delas, isso exigiria OAuth 2.0 da Roblox, que é uma
   arquitetura bem diferente — me chama se quiser evoluir pra isso depois.
+
+## Vários arquivos separados (combinar peças de arquivos diferentes)
+
+Agora o campo "Modelo 3D" aceita selecionar **mais de um arquivo de uma vez**
+(ex: `lamina.obj` + `bainha.obj`, ou dois `.zip` separados). O site converte
+cada um individualmente e depois combina tudo num único `.glb` final.
+
+A posição relativa entre eles só sai correta se a fonte original exportou
+cada arquivo usando o **mesmo referencial de coordenadas** (comum quando se
+usa "exportar selecionados" a partir do mesmo arquivo de origem no
+Blender/Maya/etc.) — não tem como adivinhar a posição relativa entre
+arquivos totalmente independentes que nunca compartilharam um sistema de
+coordenadas.
+
+## "1 mesh + 1 textura" dentro do pacote da Roblox (experimental)
+
+Confirmado na documentação oficial: um `MeshPart` da Roblox só aceita **uma
+textura base por vez** — não existe "vários materiais num mesh só" nativo.
+Por isso, quando um modelo tem peças com texturas diferentes (lâmina +
+bainha), a Roblox sempre vai criar mais de um `MeshPart`/Mesh dentro do
+pacote, não importa o que a gente faça na conversão.
+
+A única forma real de virar "1 mesh + 1 textura" é combinar as texturas
+num **atlas** (uma imagem só, com cada textura original numa região) e
+redesenhar o UV de cada peça pra apontar pra sua região dentro dessa
+imagem combinada — e foi isso que a opção **"Combinar texturas em 1 atlas
+(experimental)"** faz.
+
+Isso é manipulação direta de buffer binário (coordenadas UV) e **eu não
+tive como testar contra a Roblox real** antes de entregar — por isso vem
+desligada por padrão. Ativa só se quiser tentar, e me conta o resultado.
+Riscos conhecidos: a textura final fica "espremida" pra caber no atlas
+(perde um pouco de qualidade/nitidez), e modelos com textura em padrão
+repetido (tile) costumam ficar com costura visível.
+
+## Atualizar um asset já existente
+
+Tem um campo **"Asset ID pra atualizar"**: se você colar o ID de um asset
+que você já tem, o site sobe uma **nova versão** do conteúdo dele em vez de
+criar um novo. Limitação real da própria Roblox: o endpoint de atualização
+**só aceita arquivo `.fbx`**, não `.glb` — por isso, só nesse caso
+específico, o site converte o resultado final pra `.fbx` antes de enviar
+(um passo extra que não existe no fluxo normal de criação).
+
+## Apagar um asset da conta
+
+**Não é possível via API.** A Open Cloud Assets API da Roblox não tem
+nenhum endpoint de exclusão — só Create, Update (conteúdo e metadados) e
+Get/rollback de versão. O botão "×" no histórico do site remove o item só
+da **lista local** (no seu navegador), não da sua conta Roblox. Pra
+apagar/arquivar de verdade, é só pelo Creator Dashboard no site da Roblox
+mesmo (manual).
+
+## Outros recursos adicionados
+
+- **Miniatura no histórico**: captura uma imagem pequena do visualizador no
+  momento em que o upload termina (se a pré-visualização estava disponível
+  pra esse arquivo).
+- **Atalhos de rotação**: botões "+90° X/Y/Z" e "Zerar" ao lado dos campos
+  numéricos, pra ajustes rápidos sem digitar.
+- **Baixar imagem do visualizador**: botão que salva um PNG do que está
+  sendo mostrado no visualizador 3D, pra usar como preview/thumbnail em
+  outro lugar.
+

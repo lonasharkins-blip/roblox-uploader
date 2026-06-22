@@ -1,6 +1,10 @@
+import copy
+import io
 import json
+import math
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 import threading
@@ -10,12 +14,15 @@ import zipfile
 
 import requests
 from flask import Flask, jsonify, render_template, request
+from PIL import Image as PILImage
 from pygltflib import (
     GLTF2,
+    Buffer,
     BufferView,
     Image,
     Material,
     PbrMetallicRoughness,
+    Scene,
     Texture,
     TextureInfo,
 )
@@ -35,9 +42,272 @@ ROBLOX_OPERATION_URL = "https://apis.roblox.com/assets/v1/operations/{}"
 MESH_EXTENSIONS = {".glb", ".gltf", ".obj", ".fbx", ".dae", ".3ds", ".stl", ".ply"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # um pouco acima do limite de 20MB da Roblox p/ dar erro melhor
 DEFAULT_TARGET_SIZE = 6.0  # studs, lado maior do model — tamanho-base "tipo humano"
+ATLAS_TILE_SIZE = 512  # tamanho de cada textura individual dentro do atlas combinado
 
 # Guarda o status dos jobs em memória (ok pra uso pessoal / single instance)
 JOBS = {}
+
+
+def bake_texture_atlas(glb_path, work_dir):
+    """[EXPERIMENTAL] Combina as texturas de partes diferentes do mesmo
+    modelo (ex: lâmina + bainha) num único atlas, redesenhando o UV de cada
+    peça pra apontar pra sua região dentro do atlas -- assim o resultado
+    final usa só 1 material/textura no total, em vez de uma por peça.
+
+    Isso existe porque a Roblox só aceita 1 textura base por MeshPart -- não
+    tem suporte nativo a 'várias cores num mesh só' fora desse truque.
+    Funciona melhor em modelos simples; qualidade pode cair (textura
+    'espremida' pra caber no atlas) e não tenho como testar contra a Roblox
+    real antes de entregar, por isso é uma opção separada e desligada por
+    padrão."""
+    gltf = GLTF2().load_binary(glb_path)
+
+    if not gltf.images or len(gltf.images) < 2:
+        return glb_path, None  # já é 1 textura só (ou nenhuma) -- nada a fazer
+
+    blob = gltf.binary_blob() or b""
+
+    pil_images = {}
+    for i, img in enumerate(gltf.images):
+        if img.bufferView is None:
+            continue
+        bv = gltf.bufferViews[img.bufferView]
+        start = bv.byteOffset or 0
+        data = blob[start:start + bv.byteLength]
+        try:
+            pil_images[i] = PILImage.open(io.BytesIO(data)).convert("RGBA")
+        except Exception:
+            continue
+
+    if len(pil_images) < 2:
+        return glb_path, "Não encontrei 2+ texturas válidas pra combinar num atlas; modelo subiu sem mudar."
+
+    image_indices = sorted(pil_images.keys())
+    n = len(image_indices)
+    atlas = PILImage.new("RGBA", (ATLAS_TILE_SIZE * n, ATLAS_TILE_SIZE), (0, 0, 0, 0))
+    region_for_image = {}
+    for slot, img_idx in enumerate(image_indices):
+        tile = pil_images[img_idx].resize((ATLAS_TILE_SIZE, ATLAS_TILE_SIZE))
+        atlas.paste(tile, (slot * ATLAS_TILE_SIZE, 0))
+        region_for_image[img_idx] = (slot / n, 0.0, 1.0 / n, 1.0)
+
+    atlas_io = io.BytesIO()
+    atlas.save(atlas_io, format="PNG")
+    atlas_bytes = atlas_io.getvalue()
+
+    material_to_image = {}
+    for m_idx, mat in enumerate(gltf.materials):
+        if mat.pbrMetallicRoughness and mat.pbrMetallicRoughness.baseColorTexture is not None:
+            tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index
+            if tex_idx is not None and gltf.textures[tex_idx].source in region_for_image:
+                material_to_image[m_idx] = gltf.textures[tex_idx].source
+
+    if not material_to_image:
+        return glb_path, "Não consegui ligar nenhum material a uma textura pra montar o atlas; modelo subiu sem mudar."
+
+    pad = (-len(blob)) % 4
+    new_blob = blob + b"\x00" * pad
+    atlas_offset = len(new_blob)
+    new_blob += atlas_bytes
+
+    atlas_bv_index = len(gltf.bufferViews)
+    gltf.bufferViews.append(BufferView(buffer=0, byteOffset=atlas_offset, byteLength=len(atlas_bytes)))
+
+    atlas_image_index = len(gltf.images)
+    gltf.images.append(Image(bufferView=atlas_bv_index, mimeType="image/png"))
+
+    atlas_texture_index = len(gltf.textures)
+    gltf.textures.append(Texture(source=atlas_image_index))
+
+    atlas_material_index = len(gltf.materials)
+    gltf.materials.append(
+        Material(pbrMetallicRoughness=PbrMetallicRoughness(baseColorTexture=TextureInfo(index=atlas_texture_index)))
+    )
+
+    remapped_any = False
+    for mesh in gltf.meshes:
+        for prim in mesh.primitives:
+            if prim.material is None or prim.material not in material_to_image:
+                continue
+            img_idx = material_to_image[prim.material]
+            offset_u, offset_v, scale_u, scale_v = region_for_image[img_idx]
+
+            uv_accessor_idx = getattr(prim.attributes, "TEXCOORD_0", None)
+            if uv_accessor_idx is None:
+                continue
+
+            old_accessor = gltf.accessors[uv_accessor_idx]
+            old_bv = gltf.bufferViews[old_accessor.bufferView]
+            start = (old_bv.byteOffset or 0) + (old_accessor.byteOffset or 0)
+            count = old_accessor.count
+            stride = old_bv.byteStride or 8  # 2 floats (8 bytes) por UV se não-intercalado
+
+            new_uv_bytes = bytearray()
+            for i in range(count):
+                base = start + i * stride
+                u, v = struct.unpack_from("<ff", blob, base)
+                new_u = u * scale_u + offset_u
+                new_v = v * scale_v + offset_v
+                new_uv_bytes += struct.pack("<ff", new_u, new_v)
+
+            pad2 = (-len(new_blob)) % 4
+            new_blob += b"\x00" * pad2
+            new_bv_offset = len(new_blob)
+            new_blob += bytes(new_uv_bytes)
+
+            new_bv_index = len(gltf.bufferViews)
+            gltf.bufferViews.append(BufferView(buffer=0, byteOffset=new_bv_offset, byteLength=len(new_uv_bytes)))
+
+            new_accessor_index = len(gltf.accessors)
+            new_accessor = copy.deepcopy(old_accessor)
+            new_accessor.bufferView = new_bv_index
+            new_accessor.byteOffset = 0
+            gltf.accessors.append(new_accessor)
+
+            prim.attributes.TEXCOORD_0 = new_accessor_index
+            prim.material = atlas_material_index
+            remapped_any = True
+
+    if not remapped_any:
+        return glb_path, "Não consegui remapear nenhuma peça pro atlas combinado; modelo subiu sem mudar."
+
+    if gltf.buffers:
+        gltf.buffers[0].byteLength = len(new_blob)
+    gltf.set_binary_blob(new_blob)
+
+    output_path = os.path.join(work_dir, "atlas.glb")
+    gltf.save_binary(output_path)
+    return output_path, None
+
+
+def merge_glb_files(glb_paths, work_dir):
+    """Combina vários .glb num único arquivo: concatena buffers, materiais,
+    texturas, meshes e nós, ajustando todos os índices internos. Cada peça
+    mantém seu próprio material/textura (nada é sobrescrito). A posição
+    relativa entre as peças só fica correta se a fonte original exportou
+    cada arquivo usando o mesmo referencial de coordenadas (comum quando se
+    usa 'exportar selecionados' a partir do mesmo arquivo de origem) — não
+    tem como adivinhar posição relativa entre arquivos totalmente
+    independentes.
+    """
+    if len(glb_paths) == 1:
+        return glb_paths[0]
+
+    merged = GLTF2()
+    merged.scenes = [Scene(nodes=[])]
+    merged.scene = 0
+    merged.buffers = []
+    merged.bufferViews = []
+    merged.accessors = []
+    merged.meshes = []
+    merged.materials = []
+    merged.textures = []
+    merged.images = []
+    merged.samplers = []
+    merged.nodes = []
+
+    combined_blob = b""
+    texture_fields = (
+        ("normalTexture", None),
+        ("occlusionTexture", None),
+        ("emissiveTexture", None),
+    )
+
+    for glb_path in glb_paths:
+        gltf = GLTF2().load_binary(glb_path)
+        blob = gltf.binary_blob() or b""
+
+        pad = (-len(combined_blob)) % 4
+        combined_blob += b"\x00" * pad
+        buffer_offset = len(combined_blob)
+        combined_blob += blob
+
+        bufferview_offset = len(merged.bufferViews)
+        for bv in gltf.bufferViews:
+            new_bv = copy.deepcopy(bv)
+            new_bv.buffer = 0
+            new_bv.byteOffset = (bv.byteOffset or 0) + buffer_offset
+            merged.bufferViews.append(new_bv)
+
+        accessor_offset = len(merged.accessors)
+        for acc in gltf.accessors:
+            new_acc = copy.deepcopy(acc)
+            if new_acc.bufferView is not None:
+                new_acc.bufferView += bufferview_offset
+            merged.accessors.append(new_acc)
+
+        image_offset = len(merged.images)
+        for img in gltf.images:
+            new_img = copy.deepcopy(img)
+            if new_img.bufferView is not None:
+                new_img.bufferView += bufferview_offset
+            merged.images.append(new_img)
+
+        sampler_offset = len(merged.samplers)
+        for samp in gltf.samplers:
+            merged.samplers.append(copy.deepcopy(samp))
+
+        texture_offset = len(merged.textures)
+        for tex in gltf.textures:
+            new_tex = copy.deepcopy(tex)
+            if new_tex.source is not None:
+                new_tex.source += image_offset
+            if new_tex.sampler is not None:
+                new_tex.sampler += sampler_offset
+            merged.textures.append(new_tex)
+
+        material_offset = len(merged.materials)
+        for mat in gltf.materials:
+            new_mat = copy.deepcopy(mat)
+            if new_mat.pbrMetallicRoughness:
+                if new_mat.pbrMetallicRoughness.baseColorTexture:
+                    new_mat.pbrMetallicRoughness.baseColorTexture.index += texture_offset
+                if new_mat.pbrMetallicRoughness.metallicRoughnessTexture:
+                    new_mat.pbrMetallicRoughness.metallicRoughnessTexture.index += texture_offset
+            for field_name, _ in texture_fields:
+                tex_info = getattr(new_mat, field_name, None)
+                if tex_info is not None:
+                    tex_info.index += texture_offset
+            merged.materials.append(new_mat)
+
+        mesh_offset = len(merged.meshes)
+        for mesh in gltf.meshes:
+            new_mesh = copy.deepcopy(mesh)
+            for prim in new_mesh.primitives:
+                if prim.material is not None:
+                    prim.material += material_offset
+                if prim.indices is not None:
+                    prim.indices += accessor_offset
+                if prim.attributes:
+                    for attr_name in (
+                        "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0", "TEXCOORD_1",
+                        "COLOR_0", "JOINTS_0", "WEIGHTS_0",
+                    ):
+                        val = getattr(prim.attributes, attr_name, None)
+                        if val is not None:
+                            setattr(prim.attributes, attr_name, val + accessor_offset)
+            merged.meshes.append(new_mesh)
+
+        node_offset = len(merged.nodes)
+        for node in gltf.nodes:
+            new_node = copy.deepcopy(node)
+            if new_node.mesh is not None:
+                new_node.mesh += mesh_offset
+            if new_node.children:
+                new_node.children = [c + node_offset for c in new_node.children]
+            merged.nodes.append(new_node)
+
+        scene_idx = gltf.scene if gltf.scene is not None else 0
+        root_nodes = gltf.scenes[scene_idx].nodes if gltf.scenes else []
+        for r in root_nodes:
+            merged.scenes[0].nodes.append(r + node_offset)
+
+    merged.buffers = [Buffer(byteLength=len(combined_blob))]
+    merged.set_binary_blob(combined_blob)
+
+    output_path = os.path.join(work_dir, "combined.glb")
+    merged.save_binary(output_path)
+    return output_path
 
 
 def find_main_mesh_file(folder):
@@ -222,6 +492,94 @@ def _compute_bounding_box(gltf):
     return overall_min, overall_max
 
 
+def _quat_multiply(q1, q2):
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    return (
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+    )
+
+
+def _quat_from_axis_angle(axis, angle_rad):
+    half = angle_rad / 2.0
+    s = math.sin(half)
+    return (axis[0] * s, axis[1] * s, axis[2] * s, math.cos(half))
+
+
+def _euler_degrees_to_quaternion(rx, ry, rz):
+    """Combina rotações nos 3 eixos (em graus), aplicando X primeiro, depois Y, depois Z."""
+    qx = _quat_from_axis_angle((1, 0, 0), math.radians(rx))
+    qy = _quat_from_axis_angle((0, 1, 0), math.radians(ry))
+    qz = _quat_from_axis_angle((0, 0, 1), math.radians(rz))
+    return _quat_multiply(qz, _quat_multiply(qy, qx))
+
+
+def _quat_to_matrix_col_major(q):
+    x, y, z, w = q
+    xx, yy, zz = x * x, y * y, z * z
+    xy, xz, yz = x * y, x * z, y * z
+    wx, wy, wz = w * x, w * y, w * z
+    m00, m01, m02 = 1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy)
+    m10, m11, m12 = 2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx)
+    m20, m21, m22 = 2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy)
+    return [
+        m00, m10, m20, 0.0,
+        m01, m11, m21, 0.0,
+        m02, m12, m22, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+
+def _matrix_multiply_col_major(a, b):
+    def get(m, row, col):
+        return m[col * 4 + row]
+
+    result = [0.0] * 16
+    for col in range(4):
+        for row in range(4):
+            s = 0.0
+            for k in range(4):
+                s += get(a, row, k) * get(b, k, col)
+            result[col * 4 + row] = s
+    return result
+
+
+def rotate_model(glb_path, rx, ry, rz, work_dir):
+    """Gira o modelo todo em torno da origem (via o transform dos nós-raiz,
+    sem tocar na geometria), pelos ângulos dados em graus. Útil pra
+    corrigir modelos que chegam tortos/inclinados de propósito (pose de
+    descanso, convenção de eixo diferente etc.)."""
+    if not rx and not ry and not rz:
+        return glb_path
+
+    gltf = GLTF2().load_binary(glb_path)
+    if not gltf.scenes:
+        return glb_path
+
+    scene_idx = gltf.scene if gltf.scene is not None else 0
+    root_indices = gltf.scenes[scene_idx].nodes or []
+    if not root_indices:
+        return glb_path
+
+    correction = _euler_degrees_to_quaternion(rx, ry, rz)
+
+    for idx in root_indices:
+        node = gltf.nodes[idx]
+        if node.matrix:
+            rot_matrix = _quat_to_matrix_col_major(correction)
+            node.matrix = _matrix_multiply_col_major(rot_matrix, node.matrix)
+        else:
+            existing = tuple(node.rotation) if node.rotation else (0.0, 0.0, 0.0, 1.0)
+            node.rotation = list(_quat_multiply(correction, existing))
+
+    output_path = os.path.join(work_dir, "rotated.glb")
+    gltf.save_binary(output_path)
+    return output_path
+
+
 def normalize_scale(glb_path, target_size, work_dir):
     """Escala o modelo todo (via o transform dos nós-raiz da cena, sem tocar
     na geometria) pra que o lado maior do bounding box vire `target_size`
@@ -285,8 +643,28 @@ def merge_parts(glb_path, work_dir):
     )
 
 
+def poll_operation(operation_id):
+    """Espera a Roblox terminar a moderação/processamento de uma criação ou
+    atualização de asset, e devolve o assetId resultante."""
+    for _ in range(40):
+        time.sleep(3)
+        op_resp = requests.get(
+            ROBLOX_OPERATION_URL.format(operation_id),
+            headers={"x-api-key": ROBLOX_API_KEY},
+            timeout=30,
+        )
+        op_data = op_resp.json()
+        if op_data.get("done"):
+            response = op_data.get("response")
+            if response and response.get("assetId"):
+                return response["assetId"]
+            raise RuntimeError(f"A Roblox rejeitou o asset (provavelmente na moderação): {op_data}")
+
+    raise RuntimeError("Deu timeout esperando a moderação da Roblox responder. Tente checar seu Inventário em alguns minutos.")
+
+
 def upload_to_roblox(glb_path, display_name, description):
-    """Sobe o .glb pra Roblox via Open Cloud Assets API e espera a moderação."""
+    """Cria um novo asset (Model) na Roblox via Open Cloud e espera a moderação."""
     request_payload = {
         "assetType": "Model",
         "displayName": display_name[:50] if display_name else "Modelo sem nome",
@@ -314,52 +692,105 @@ def upload_to_roblox(glb_path, display_name, description):
     if not operation_id:
         raise RuntimeError(f"Resposta inesperada da Roblox: {resp.text[:500]}")
 
-    for _ in range(40):
-        time.sleep(3)
-        op_resp = requests.get(
-            ROBLOX_OPERATION_URL.format(operation_id),
+    return poll_operation(operation_id)
+
+
+def convert_glb_to_fbx(glb_path, work_dir):
+    """A Roblox só aceita .fbx pra ATUALIZAR (PATCH) o conteúdo de um asset
+    já existente — .glb não é aceito nesse endpoint específico (é uma
+    limitação da própria API, ainda em beta). Por isso, só pra esse caso,
+    convertemos o resultado final de volta pra .fbx."""
+    output_path = os.path.join(work_dir, "for_update.fbx")
+    result = subprocess.run(
+        ["assimp", "export", glb_path, output_path],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0 or not os.path.exists(output_path):
+        raise RuntimeError(f"Falha ao gerar .fbx: {result.stderr.strip()[-500:]}")
+    return output_path
+
+
+def update_roblox_asset(asset_id, fbx_path, display_name, description):
+    """Atualiza o CONTEÚDO de um asset Model já existente (cria uma nova
+    versão), via o endpoint PATCH (beta) da Open Cloud Assets API."""
+    request_payload = {
+        "assetType": "Model",
+        "assetId": str(asset_id),
+        "displayName": display_name[:50] if display_name else "Modelo sem nome",
+        "description": (description or "")[:1000],
+        "creationContext": {"creator": {"userId": ROBLOX_USER_ID}},
+    }
+
+    url = f"{ROBLOX_ASSETS_URL}/{asset_id}"
+    with open(fbx_path, "rb") as f:
+        files = {
+            "request": (None, json.dumps(request_payload), "application/json"),
+            "fileContent": (os.path.basename(fbx_path), f, "model/fbx"),
+        }
+        resp = requests.patch(
+            url,
             headers={"x-api-key": ROBLOX_API_KEY},
-            timeout=30,
+            files=files,
+            timeout=60,
         )
-        op_data = op_resp.json()
-        if op_data.get("done"):
-            response = op_data.get("response")
-            if response and response.get("assetId"):
-                return response["assetId"]
-            raise RuntimeError(f"A Roblox rejeitou o asset (provavelmente na moderação): {op_data}")
 
-    raise RuntimeError("Deu timeout esperando a moderação da Roblox responder. Tente checar seu Inventário em alguns minutos.")
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Roblox recusou a atualização ({resp.status_code}): {resp.text[:500]}")
+
+    operation_path = resp.json().get("path", "")
+    operation_id = operation_path.split("/")[-1]
+    if not operation_id:
+        raise RuntimeError(f"Resposta inesperada da Roblox: {resp.text[:500]}")
+
+    return poll_operation(operation_id)
 
 
-def process_job(job_id, saved_path, display_name, description, texture_path, target_size, merge_enabled):
-    """Roda em background: extrai/converte/normaliza/envia, guarda o resultado em JOBS."""
+def process_single_source(saved_path, work_dir, idx):
+    """Leva um arquivo de origem (zip ou modelo direto) até um .glb individual."""
+    mesh_path = saved_path
+
+    if saved_path.lower().endswith(".zip"):
+        extract_dir = os.path.join(work_dir, f"extracted_{idx}")
+        os.makedirs(extract_dir, exist_ok=True)
+        with zipfile.ZipFile(saved_path, "r") as z:
+            z.extractall(extract_dir)
+        mesh_path = find_main_mesh_file(extract_dir)
+        if not mesh_path:
+            raise RuntimeError(f"Não encontrei modelo 3D dentro de '{os.path.basename(saved_path)}'.")
+
+    ext = os.path.splitext(mesh_path)[1].lower()
+    if ext == ".blend":
+        raise RuntimeError(
+            f"'{os.path.basename(saved_path)}' é um .blend, não suportado aqui (precisa do Blender pra abrir)."
+        )
+    if ext not in MESH_EXTENSIONS:
+        raise RuntimeError(f"Formato '{ext}' não é suportado ('{os.path.basename(saved_path)}').")
+
+    return convert_to_glb(mesh_path, work_dir)
+
+
+def process_job(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled):
+    """Roda em background: extrai/converte/combina/normaliza/envia, guarda o resultado em JOBS."""
     try:
         with tempfile.TemporaryDirectory() as work_dir:
-            mesh_path = saved_path
-
-            if saved_path.lower().endswith(".zip"):
-                extract_dir = os.path.join(work_dir, "extracted")
-                os.makedirs(extract_dir, exist_ok=True)
-                with zipfile.ZipFile(saved_path, "r") as z:
-                    z.extractall(extract_dir)
-                mesh_path = find_main_mesh_file(extract_dir)
-                if not mesh_path:
-                    raise RuntimeError("Não encontrei nenhum arquivo de modelo 3D dentro do .zip.")
-
-            ext = os.path.splitext(mesh_path)[1].lower()
-            if ext == ".blend":
-                raise RuntimeError(
-                    "Arquivos .blend não são suportados aqui (precisam do Blender pra abrir). "
-                    "Procure a versão exportada em .glb, .obj ou .fbx do modelo."
-                )
-            if ext not in MESH_EXTENSIONS:
-                raise RuntimeError(f"Formato '{ext}' não é um modelo 3D suportado.")
-
             warnings = []
 
-            glb_path, convert_warning = convert_to_glb(mesh_path, work_dir)
-            if convert_warning:
-                warnings.append(convert_warning)
+            part_glbs = []
+            for idx, saved_path in enumerate(saved_paths):
+                glb_path, convert_warning = process_single_source(saved_path, work_dir, idx)
+                if convert_warning:
+                    warnings.append(convert_warning)
+                part_glbs.append(glb_path)
+
+            if len(part_glbs) > 1:
+                try:
+                    glb_path = merge_glb_files(part_glbs, work_dir)
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(f"Não consegui combinar os {len(part_glbs)} arquivos num modelo só: {exc}")
+            else:
+                glb_path = part_glbs[0]
 
             if texture_path:
                 try:
@@ -371,10 +802,27 @@ def process_job(job_id, saved_path, display_name, description, texture_path, tar
             if diag:
                 warnings.append(diag)
 
+            if bake_atlas_enabled:
+                try:
+                    atlas_path, atlas_warning = bake_texture_atlas(glb_path, work_dir)
+                    if atlas_path:
+                        glb_path = atlas_path
+                    if atlas_warning:
+                        warnings.append(atlas_warning)
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Não consegui combinar as texturas num atlas ({exc}); subiu com as texturas originais separadas.")
+
             if merge_enabled:
                 glb_path, merge_warning = merge_parts(glb_path, work_dir)
                 if merge_warning:
                     warnings.append(merge_warning)
+
+            rx, ry, rz = rotation_xyz
+            if rx or ry or rz:
+                try:
+                    glb_path = rotate_model(glb_path, rx, ry, rz, work_dir)
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Não consegui aplicar a rotação ({exc}); subiu na orientação original.")
 
             if target_size:
                 try:
@@ -386,7 +834,15 @@ def process_job(job_id, saved_path, display_name, description, texture_path, tar
                 except Exception as exc:  # noqa: BLE001
                     warnings.append(f"Não consegui padronizar o tamanho automaticamente ({exc}); subiu no tamanho original.")
 
-            asset_id = upload_to_roblox(glb_path, display_name, description)
+            if update_asset_id:
+                try:
+                    fbx_path = convert_glb_to_fbx(glb_path, work_dir)
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(f"Não consegui gerar o .fbx exigido pra atualizar um asset existente: {exc}")
+                asset_id = update_roblox_asset(update_asset_id, fbx_path, display_name, description)
+                warnings.append("Enviado como ATUALIZAÇÃO (nova versão) do asset existente, não como asset novo.")
+            else:
+                asset_id = upload_to_roblox(glb_path, display_name, description)
 
             result = {
                 "status": "done",
@@ -399,10 +855,11 @@ def process_job(job_id, saved_path, display_name, description, texture_path, tar
     except Exception as exc:  # noqa: BLE001
         JOBS[job_id] = {"status": "error", "error": str(exc)}
     finally:
-        try:
-            os.remove(saved_path)
-        except OSError:
-            pass
+        for p in saved_paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
         if texture_path:
             try:
                 os.remove(texture_path)
@@ -424,12 +881,13 @@ def upload():
     if secret != APP_SECRET:
         return jsonify({"error": "Senha incorreta."}), 401
 
-    if "file" not in request.files or request.files["file"].filename == "":
+    uploaded_files = [f for f in request.files.getlist("file") if f and f.filename]
+    if not uploaded_files:
         return jsonify({"error": "Nenhum arquivo enviado."}), 400
 
-    uploaded = request.files["file"]
-    display_name = request.form.get("displayName", "").strip() or os.path.splitext(uploaded.filename)[0]
+    display_name = request.form.get("displayName", "").strip() or os.path.splitext(uploaded_files[0].filename)[0]
     description = request.form.get("description", "").strip()
+    update_asset_id = request.form.get("updateAssetId", "").strip() or None
 
     try:
         target_size = float(request.form.get("targetSize", DEFAULT_TARGET_SIZE))
@@ -438,14 +896,25 @@ def upload():
     target_size = max(0.1, min(target_size, 500))
 
     merge_enabled = request.form.get("mergeParts", "true").strip().lower() != "false"
+    bake_atlas_enabled = request.form.get("bakeAtlas", "false").strip().lower() == "true"
+
+    def _parse_angle(field):
+        try:
+            return float(request.form.get(field, 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    rotation_xyz = (_parse_angle("rotateX"), _parse_angle("rotateY"), _parse_angle("rotateZ"))
 
     upload_dir = tempfile.mkdtemp(prefix="upload_")
-    saved_path = os.path.join(upload_dir, uploaded.filename)
-    uploaded.save(saved_path)
-
-    if os.path.getsize(saved_path) > MAX_UPLOAD_BYTES:
-        shutil.rmtree(upload_dir, ignore_errors=True)
-        return jsonify({"error": "Arquivo maior que o limite de 20MB da Roblox."}), 400
+    saved_paths = []
+    for i, uf in enumerate(uploaded_files):
+        path = os.path.join(upload_dir, f"{i}_{uf.filename}")
+        uf.save(path)
+        if os.path.getsize(path) > MAX_UPLOAD_BYTES:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            return jsonify({"error": f"O arquivo '{uf.filename}' é maior que o limite de 20MB da Roblox."}), 400
+        saved_paths.append(path)
 
     texture_path = None
     texture_file = request.files.get("texture")
@@ -462,7 +931,7 @@ def upload():
 
     thread = threading.Thread(
         target=process_job,
-        args=(job_id, saved_path, display_name, description, texture_path, target_size, merge_enabled),
+        args=(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled),
         daemon=True,
     )
     thread.start()
