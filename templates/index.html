@@ -268,6 +268,7 @@
   const rotateZInput = document.getElementById('rotateZ');
 
   let previewObjectUrl = null;
+  let framingTimeout = null;
 
   secretInput.value = localStorage.getItem('roblox_uploader_secret') || '';
   secretInput.addEventListener('change', () => {
@@ -281,10 +282,19 @@
     const z = parseFloat(rotateZInput.value) || 0; // eixo Z -> roll
     // model-viewer espera "roll pitch yaw"
     modelPreview.orientation = `${z}deg ${x}deg ${y}deg`;
-    // setar só a property às vezes não força redesenhar na hora — isso garante o redraw imediato
-    if (typeof modelPreview.updateFraming === 'function') {
-      modelPreview.updateFraming();
-    }
+
+    // Só recalcula o enquadramento da câmera depois que parar de digitar (debounce) e
+    // de forma instantânea (sem animação) -- evita a câmera "voar" enquanto você ainda
+    // está arrastando ou digitando, que era a causa do comportamento estranho.
+    clearTimeout(framingTimeout);
+    framingTimeout = setTimeout(() => {
+      if (typeof modelPreview.updateFraming === 'function') {
+        modelPreview.updateFraming();
+      }
+      if (typeof modelPreview.jumpCameraToGoal === 'function') {
+        modelPreview.jumpCameraToGoal();
+      }
+    }, 350);
   }
 
   fileInput.addEventListener('change', () => {
