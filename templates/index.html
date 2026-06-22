@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Upload pra Roblox</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 <style>
   :root {
     --bg: #ffffff;
@@ -62,6 +63,8 @@
   }
   .row-2 { display: flex; gap: 12px; }
   .row-2 > div { flex: 1; }
+  .row-3 { display: flex; gap: 8px; }
+  .row-3 > div { flex: 1; }
 
   input[type="text"],
   input[type="number"],
@@ -158,6 +161,8 @@
       <input type="file" id="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.ply,.zip" />
       <span id="dropLabel">Escolher arquivo (.glb, .obj, .fbx, .zip…)</span>
     </label>
+    <model-viewer id="modelPreview" camera-controls style="display:none; width:100%; height:260px; margin-top:10px; border:1px solid var(--border); border-radius:6px; background:var(--bg);"></model-viewer>
+    <div class="help" id="previewHint" style="display:none;">Arraste pra girar a câmera e olhar de todo ângulo. A rotação abaixo já reflete aqui.</div>
   </fieldset>
 
   <fieldset>
@@ -180,6 +185,22 @@
       Combinar peças separadas
     </label>
     <div class="help">Corrige peças (ex: lâmina + bainha) que vinham desencontradas ao importar uma por uma. Desative só se quiser as partes soltas de propósito.</div>
+  </fieldset>
+
+  <fieldset>
+    <label>Rotação pra corrigir orientação (graus)</label>
+    <div class="row-3">
+      <div>
+        <input type="number" id="rotateX" value="0" step="5" placeholder="X" />
+      </div>
+      <div>
+        <input type="number" id="rotateY" value="0" step="5" placeholder="Y" />
+      </div>
+      <div>
+        <input type="number" id="rotateZ" value="0" step="5" placeholder="Z" />
+      </div>
+    </div>
+    <div class="help">Deixe 0/0/0 se o modelo já chega na posição certa. Pra deixar algo "deitado" que vem na diagonal, teste valores em Z (ou X) — vai ser por tentativa, ajuste e envie de novo até encaixar.</div>
   </fieldset>
 
   <fieldset>
@@ -232,17 +253,50 @@
   const submitBtn = document.getElementById('submitBtn');
   const statusBox = document.getElementById('statusBox');
   const historyList = document.getElementById('historyList');
+  const modelPreview = document.getElementById('modelPreview');
+  const previewHint = document.getElementById('previewHint');
+  const rotateXInput = document.getElementById('rotateX');
+  const rotateYInput = document.getElementById('rotateY');
+  const rotateZInput = document.getElementById('rotateZ');
+
+  let previewObjectUrl = null;
 
   secretInput.value = localStorage.getItem('roblox_uploader_secret') || '';
   secretInput.addEventListener('change', () => {
     localStorage.setItem('roblox_uploader_secret', secretInput.value);
   });
 
+  function updatePreviewOrientation() {
+    if (modelPreview.style.display === 'none') return;
+    const x = parseFloat(rotateXInput.value) || 0; // eixo X -> pitch
+    const y = parseFloat(rotateYInput.value) || 0; // eixo Y -> yaw
+    const z = parseFloat(rotateZInput.value) || 0; // eixo Z -> roll
+    // model-viewer espera "roll pitch yaw"
+    modelPreview.setAttribute('orientation', `${z}deg ${x}deg ${y}deg`);
+  }
+
   fileInput.addEventListener('change', () => {
-    if (fileInput.files.length) {
-      dropLabel.textContent = fileInput.files[0].name;
-      dropArea.classList.add('has-file');
+    if (!fileInput.files.length) return;
+    const file = fileInput.files[0];
+    dropLabel.textContent = file.name;
+    dropArea.classList.add('has-file');
+
+    const ext = file.name.toLowerCase().split('.').pop();
+    if (ext === 'glb' || ext === 'gltf') {
+      if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+      previewObjectUrl = URL.createObjectURL(file);
+      modelPreview.src = previewObjectUrl;
+      modelPreview.style.display = 'block';
+      previewHint.style.display = 'block';
+      updatePreviewOrientation();
+    } else {
+      modelPreview.style.display = 'none';
+      previewHint.style.display = 'none';
     }
+  });
+
+  [rotateXInput, rotateYInput, rotateZInput].forEach(el => {
+    el.addEventListener('input', updatePreviewOrientation);
   });
 
   textureInput.addEventListener('change', () => {
@@ -324,6 +378,9 @@
     if (textureInput.files.length) formData.append('texture', textureInput.files[0]);
     formData.append('targetSize', document.getElementById('targetSize').value);
     formData.append('mergeParts', document.getElementById('mergeParts').checked ? 'true' : 'false');
+    formData.append('rotateX', document.getElementById('rotateX').value || '0');
+    formData.append('rotateY', document.getElementById('rotateY').value || '0');
+    formData.append('rotateZ', document.getElementById('rotateZ').value || '0');
     formData.append('displayName', document.getElementById('displayName').value);
     formData.append('description', document.getElementById('description').value);
 
