@@ -49,10 +49,19 @@ JOBS = {}
 
 
 def bake_texture_atlas(glb_path, work_dir):
-    """[EXPERIMENTAL] Combina as texturas de partes diferentes do mesmo
-    modelo (ex: lâmina + bainha) num único atlas, redesenhando o UV de cada
-    peça pra apontar pra sua região dentro do atlas -- assim o resultado
-    final usa só 1 material/textura no total, em vez de uma por peça.
+    """[EXPERIMENTAL] Combina as texturas de COR de partes diferentes do
+    mesmo modelo (ex: lâmina + bainha) num único atlas, redesenhando o UV de
+    cada peça pra apontar pra sua região dentro do atlas -- assim o
+    resultado final usa só 1 material/textura no total, em vez de uma por
+    peça.
+
+    Só entram no atlas as texturas usadas como `baseColorTexture` (a cor
+    visível) de cada material -- mapas de normal/relevo, metálico-
+    -rugosidade, oclusão e emissivo ficam de fora de propósito, já que a
+    Roblox MeshPart só usa uma textura de cor mesmo, e incluir essas outras
+    no atlas só desperdiçava espaço e podia aparecer como manchas
+    arroxeadas/azuladas (a cor típica de um mapa de normal) caso algo saísse
+    do lugar.
 
     Isso existe porque a Roblox só aceita 1 textura base por MeshPart -- não
     tem suporte nativo a 'várias cores num mesh só' fora desse truque.
@@ -62,13 +71,27 @@ def bake_texture_atlas(glb_path, work_dir):
     padrão."""
     gltf = GLTF2().load_binary(glb_path)
 
-    if not gltf.images or len(gltf.images) < 2:
-        return glb_path, None  # já é 1 textura só (ou nenhuma) -- nada a fazer
+    if not gltf.images:
+        return glb_path, None
+
+    # Mapeia cada material só pela sua textura de COR (baseColorTexture) --
+    # ignora normalTexture/metallicRoughnessTexture/occlusionTexture/emissiveTexture.
+    material_to_image = {}
+    for m_idx, mat in enumerate(gltf.materials):
+        if mat.pbrMetallicRoughness and mat.pbrMetallicRoughness.baseColorTexture is not None:
+            tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index
+            if tex_idx is not None and gltf.textures[tex_idx].source is not None:
+                material_to_image[m_idx] = gltf.textures[tex_idx].source
+
+    needed_image_indices = sorted(set(material_to_image.values()))
+    if len(needed_image_indices) < 2:
+        return glb_path, None  # já é 1 textura de cor só (ou nenhuma) -- nada a combinar
 
     blob = gltf.binary_blob() or b""
 
     pil_images = {}
-    for i, img in enumerate(gltf.images):
+    for i in needed_image_indices:
+        img = gltf.images[i]
         if img.bufferView is None:
             continue
         bv = gltf.bufferViews[img.bufferView]
@@ -80,7 +103,7 @@ def bake_texture_atlas(glb_path, work_dir):
             continue
 
     if len(pil_images) < 2:
-        return glb_path, "Não encontrei 2+ texturas válidas pra combinar num atlas; modelo subiu sem mudar."
+        return glb_path, "Não encontrei 2+ texturas de cor válidas pra combinar num atlas; modelo subiu sem mudar."
 
     image_indices = sorted(pil_images.keys())
     n = len(image_indices)
@@ -95,15 +118,11 @@ def bake_texture_atlas(glb_path, work_dir):
     atlas.save(atlas_io, format="PNG")
     atlas_bytes = atlas_io.getvalue()
 
-    material_to_image = {}
-    for m_idx, mat in enumerate(gltf.materials):
-        if mat.pbrMetallicRoughness and mat.pbrMetallicRoughness.baseColorTexture is not None:
-            tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index
-            if tex_idx is not None and gltf.textures[tex_idx].source in region_for_image:
-                material_to_image[m_idx] = gltf.textures[tex_idx].source
+    # Mantém só os materiais cuja textura de cor realmente entrou no atlas
+    material_to_image = {m: img for m, img in material_to_image.items() if img in region_for_image}
 
     if not material_to_image:
-        return glb_path, "Não consegui ligar nenhum material a uma textura pra montar o atlas; modelo subiu sem mudar."
+        return glb_path, "Não consegui ligar nenhum material a uma textura de cor pra montar o atlas; modelo subiu sem mudar."
 
     pad = (-len(blob)) % 4
     new_blob = blob + b"\x00" * pad
