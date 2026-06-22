@@ -599,6 +599,40 @@ def rotate_model(glb_path, rx, ry, rz, work_dir):
     return output_path
 
 
+def auto_orient(glb_path, work_dir):
+    """[EXPERIMENTAL] Tenta deixar o modelo 'de pé' automaticamente, girando
+    90° pra alinhar o lado MAIS LONGO do modelo com o eixo vertical (Y).
+
+    É uma heurística simples baseada só no formato da caixa que envolve o
+    modelo (bounding box) -- funciona bem pra objetos alongados (espada,
+    bastão, pessoa em pé), mas pode ERRAR em objetos que são naturalmente
+    largos/baixos de propósito (escudo, mesa, veículo), porque o código não
+    sabe o que o objeto realmente é, só mede o formato dele.
+
+    Só age se os campos de rotação manual estiverem zerados -- se você já
+    ajustou X/Y/Z na mão, isso é ignorado, pra não conflitar com o que você
+    decidiu de propósito."""
+    gltf = GLTF2().load_binary(glb_path)
+    bbox = _compute_bounding_box(gltf)
+    if not bbox:
+        return glb_path, None
+
+    bmin, bmax = bbox
+    dx = bmax[0] - bmin[0]
+    dy = bmax[1] - bmin[1]
+    dz = bmax[2] - bmin[2]
+
+    if dy >= dx and dy >= dz:
+        return glb_path, None  # o lado mais longo já é o eixo Y -- nada a fazer
+
+    if dx >= dz:
+        rx, ry, rz = 0, 0, 90  # traz o comprimento de X pro eixo Y
+    else:
+        rx, ry, rz = 90, 0, 0  # traz o comprimento de Z pro eixo Y
+
+    return rotate_model(glb_path, rx, ry, rz, work_dir), None
+
+
 def normalize_scale(glb_path, target_size, work_dir):
     """Escala o modelo todo (via o transform dos nós-raiz da cena, sem tocar
     na geometria) pra que o lado maior do bounding box vire `target_size`
@@ -790,7 +824,7 @@ def process_single_source(saved_path, work_dir, idx):
     return convert_to_glb(mesh_path, work_dir)
 
 
-def process_job(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled):
+def process_job(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled, auto_orient_enabled):
     """Roda em background: extrai/converte/combina/normaliza/envia, guarda o resultado em JOBS."""
     try:
         with tempfile.TemporaryDirectory() as work_dir:
@@ -842,6 +876,15 @@ def process_job(job_id, saved_paths, display_name, description, texture_path, ta
                     glb_path = rotate_model(glb_path, rx, ry, rz, work_dir)
                 except Exception as exc:  # noqa: BLE001
                     warnings.append(f"Não consegui aplicar a rotação ({exc}); subiu na orientação original.")
+            elif auto_orient_enabled:
+                try:
+                    oriented_path, orient_warning = auto_orient(glb_path, work_dir)
+                    if oriented_path:
+                        glb_path = oriented_path
+                    if orient_warning:
+                        warnings.append(orient_warning)
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Não consegui auto-orientar o modelo ({exc}); subiu na orientação original.")
 
             if target_size:
                 try:
@@ -916,6 +959,7 @@ def upload():
 
     merge_enabled = request.form.get("mergeParts", "true").strip().lower() != "false"
     bake_atlas_enabled = request.form.get("bakeAtlas", "false").strip().lower() == "true"
+    auto_orient_enabled = request.form.get("autoOrient", "true").strip().lower() != "false"
 
     def _parse_angle(field):
         try:
@@ -950,7 +994,7 @@ def upload():
 
     thread = threading.Thread(
         target=process_job,
-        args=(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled),
+        args=(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled, auto_orient_enabled),
         daemon=True,
     )
     thread.start()

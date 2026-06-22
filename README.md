@@ -244,3 +244,24 @@ mesmo (manual).
   sendo mostrado no visualizador 3D, pra usar como preview/thumbnail em
   outro lugar.
 
+
+## Modelos vêm em orientações diferentes (deitado, em pé, torto)
+
+Tem um checkbox novo, **"Auto-orientar 'de pé' (experimental)"** (ativado
+por padrão), que tenta resolver isso sem você precisar testar ângulo por
+ângulo. A lógica é simples: ele mede a caixa que envolve o modelo
+(bounding box) e, se o lado mais longo não estiver alinhado com o eixo
+vertical, gira 90° pra alinhar.
+
+**Isso é uma heurística, não uma solução garantida.** Funciona bem pra
+objetos alongados (espada, bastão, pessoa em pé) porque "o lado mais longo
+= a direção que deveria ficar vertical" é uma suposição razoável nesses
+casos. Mas vai **errar** em objetos que são largos/baixos de propósito
+(escudo, mesa, veículo) — o código não sabe o que o objeto realmente é, só
+mede o formato da caixa em volta dele.
+
+Os campos de **rotação manual sempre têm prioridade**: se você preencher
+qualquer um dos campos X/Y/Z, a auto-orientação é ignorada nesse upload
+(evita ela "competir" com um ajuste que você já fez de propósito). Se
+isso errar pra um objeto específico, é só desativar o checkbox e ajustar
+manualmente como antes.
