@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Upload pra Roblox</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #161616;
+    --muted: #6b6b6b;
+    --border: #dcdcdc;
+    --border-focus: #161616;
+    --accent: #161616;
+    --accent-text: #ffffff;
+    --ok: #1a7a3c;
+    --ok-bg: #f0f8f2;
+    --error: #b8282c;
+    --error-bg: #fbf0f0;
+    --warn: #8a6300;
+    --warn-bg: #fbf6e8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  html[data-theme="dark"] {
+    --bg: #121212;
+    --text: #f0f0f0;
+    --muted: #9a9a9a;
+    --border: #3a3a3a;
+    --border-focus: #f0f0f0;
+    --accent: #f0f0f0;
+    --accent-text: #121212;
+    --ok: #6fd19a;
+    --ok-bg: #16261d;
+    --error: #ff8b8b;
+    --error-bg: #2a1717;
+    --warn: #e0c14a;
+    --warn-bg: #2a2414;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    transition: background 0.15s, color 0.15s;
+  }
+  .page { max-width: 420px; margin: 0 auto; padding: 32px 20px 60px; }
+
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  #themeToggle {
+    width: auto; margin: 0; padding: 6px 10px; font-size: 12px; font-weight: 500;
+    background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
+  }
+
+  fieldset { border: none; padding: 0; margin: 0 0 18px; }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .row-2 { display: flex; gap: 12px; }
+  .row-2 > div { flex: 1; }
+  .row-3 { display: flex; gap: 8px; }
+  .row-3 > div { flex: 1; }
+
+  input[type="text"],
+  input[type="number"],
+  input[type="password"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+  }
+  input:focus { outline: none; border-color: var(--border-focus); }
+  input::placeholder { color: #b0b0b0; }
+
+  .file-input {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 14px;
+    color: var(--muted);
+    cursor: pointer;
+    background: var(--bg);
+  }
+  .file-input.has-file { color: var(--text); border-color: var(--border-focus); }
+  .file-input input { display: none; }
+
+  .help { font-size: 12px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
+
+  .rotate-panel {
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    padding: 10px 12px 12px;
+  }
+  .rotate-panel .help { margin-top: 8px; margin-bottom: 0; }
+
+  .checkbox-label {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; color: var(--text); margin-bottom: 0; cursor: pointer;
+  }
+  .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+  button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  button:disabled { background: #b0b0b0; cursor: default; }
+
+  .status {
+    margin-top: 16px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+    display: none;
+  }
+  .status.show { display: block; }
+  .status.processing { background: #f2f2f2; color: #4a4a4a; }
+  .status.done { background: var(--ok-bg); color: var(--ok); }
+  .status.error { background: var(--error-bg); color: var(--error); }
+  .status a { color: inherit; text-decoration: underline; }
+  .status .warning-line { display: block; color: var(--warn); margin-top: 6px; }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 28px 0 18px; }
+
+  .history-row {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: 13px; padding: 7px 0; border-bottom: 1px solid var(--border);
+  }
+  .history-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history-row .status-ok { color: var(--ok); }
+  .history-row .status-err { color: var(--error); }
+  .empty-history { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <h1>Upload pra Roblox</h1>
+    <button id="themeToggle" type="button">Escuro</button>
+  </div>
+
+  <fieldset>
+    <label for="secret">Senha</label>
+    <input type="password" id="secret" placeholder="APP_SECRET" />
+  </fieldset>
+
+  <fieldset>
+    <label for="file">Modelo 3D</label>
+    <label class="file-input" id="dropArea">
+      <input type="file" id="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.ply,.zip" />
+      <span id="dropLabel">Escolher arquivo (.glb, .obj, .fbx, .zip…)</span>
+    </label>
+    <model-viewer id="modelPreview" camera-controls style="display:none; width:100%; height:260px; margin-top:10px; border:1px solid var(--border); border-radius:6px 6px 0 0; background:var(--bg);"></model-viewer>
+    <div class="rotate-panel" id="rotatePanel" style="display:none;">
+      <div class="row-3">
+        <div>
+          <input type="number" id="rotateX" value="0" step="5" placeholder="X" />
+        </div>
+        <div>
+          <input type="number" id="rotateY" value="0" step="5" placeholder="Y" />
+        </div>
+        <div>
+          <input type="number" id="rotateZ" value="0" step="5" placeholder="Z" />
+        </div>
+      </div>
+      <div class="help">Rotação em graus (X/Y/Z) pra corrigir a orientação — gira o modelo aí em cima conforme você digita.</div>
+    </div>
+    <div class="help" id="previewHint" style="display:none;">Arraste pra girar a câmera e olhar de todo ângulo.</div>
+  </fieldset>
+
+  <fieldset>
+    <label for="texture">Textura manual (opcional)</label>
+    <label class="file-input" id="dropAreaTex">
+      <input type="file" id="texture" accept=".png,.jpg,.jpeg" />
+      <span id="dropLabelTex">Só se o modelo vier sem cor</span>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <label for="targetSize">Tamanho (lado maior, em studs)</label>
+    <input type="number" id="targetSize" value="6" min="0.1" max="500" step="0.5" />
+    <div class="help">Padroniza o tamanho de todo modelo enviado. 6 ≈ escala de personagem.</div>
+  </fieldset>
+
+  <fieldset class="checkbox-field">
+    <label class="checkbox-label">
+      <input type="checkbox" id="mergeParts" checked />
+      Combinar peças separadas
+    </label>
+    <div class="help">Corrige peças (ex: lâmina + bainha) que vinham desencontradas ao importar uma por uma. Desative só se quiser as partes soltas de propósito.</div>
+  </fieldset>
+
+
+  <fieldset>
+    <div class="row-2">
+      <div>
+        <label for="displayName">Nome</label>
+        <input type="text" id="displayName" placeholder="Nome do modelo" maxlength="50" />
+      </div>
+      <div>
+        <label for="description">Descrição</label>
+        <input type="text" id="description" placeholder="Opcional" maxlength="200" />
+      </div>
+    </div>
+  </fieldset>
+
+  <button id="submitBtn">Enviar</button>
+
+  <div class="status" id="statusBox"></div>
+
+  <hr>
+  <div id="historyList"></div>
+</div>
+
+<script>
+  const themeToggle = document.getElementById('themeToggle');
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    themeToggle.textContent = theme === 'dark' ? 'Claro' : 'Escuro';
+  }
+
+  const savedTheme = localStorage.getItem('roblox_uploader_theme');
+  const systemPrefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(savedTheme || (systemPrefersDark ? 'dark' : 'light'));
+
+  themeToggle.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    localStorage.setItem('roblox_uploader_theme', next);
+  });
+
+  const secretInput = document.getElementById('secret');
+  const fileInput = document.getElementById('file');
+  const textureInput = document.getElementById('texture');
+  const dropArea = document.getElementById('dropArea');
+  const dropAreaTex = document.getElementById('dropAreaTex');
+  const dropLabel = document.getElementById('dropLabel');
+  const dropLabelTex = document.getElementById('dropLabelTex');
+  const submitBtn = document.getElementById('submitBtn');
+  const statusBox = document.getElementById('statusBox');
+  const historyList = document.getElementById('historyList');
+  const modelPreview = document.getElementById('modelPreview');
+  const previewHint = document.getElementById('previewHint');
+  const rotatePanel = document.getElementById('rotatePanel');
+  const rotateXInput = document.getElementById('rotateX');
+  const rotateYInput = document.getElementById('rotateY');
+  const rotateZInput = document.getElementById('rotateZ');
+
+  let previewObjectUrl = null;
+
+  secretInput.value = localStorage.getItem('roblox_uploader_secret') || '';
+  secretInput.addEventListener('change', () => {
+    localStorage.setItem('roblox_uploader_secret', secretInput.value);
+  });
+
+  function updatePreviewOrientation() {
+    if (modelPreview.style.display === 'none') return;
+    const x = parseFloat(rotateXInput.value) || 0; // eixo X -> pitch
+    const y = parseFloat(rotateYInput.value) || 0; // eixo Y -> yaw
+    const z = parseFloat(rotateZInput.value) || 0; // eixo Z -> roll
+    // model-viewer espera "roll pitch yaw"
+    modelPreview.orientation = `${z}deg ${x}deg ${y}deg`;
+    // setar só a property às vezes não força redesenhar na hora — isso garante o redraw imediato
+    if (typeof modelPreview.updateFraming === 'function') {
+      modelPreview.updateFraming();
+    }
+  }
+
+  fileInput.addEventListener('change', () => {
+    if (!fileInput.files.length) return;
+    const file = fileInput.files[0];
+    dropLabel.textContent = file.name;
+    dropArea.classList.add('has-file');
+
+    const ext = file.name.toLowerCase().split('.').pop();
+    if (ext === 'glb' || ext === 'gltf') {
+      if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+      previewObjectUrl = URL.createObjectURL(file);
+      modelPreview.src = previewObjectUrl;
+      modelPreview.style.display = 'block';
+      previewHint.style.display = 'block';
+      rotatePanel.style.display = 'block';
+      updatePreviewOrientation();
+    } else {
+      modelPreview.style.display = 'none';
+      previewHint.style.display = 'none';
+      rotatePanel.style.display = 'none';
+    }
+  });
+
+  [rotateXInput, rotateYInput, rotateZInput].forEach(el => {
+    el.addEventListener('input', updatePreviewOrientation);
+  });
+
+  textureInput.addEventListener('change', () => {
+    if (textureInput.files.length) {
+      dropLabelTex.textContent = textureInput.files[0].name;
+      dropAreaTex.classList.add('has-file');
+    }
+  });
+
+  function loadHistory() {
+    const items = JSON.parse(localStorage.getItem('rbx_history') || '[]');
+    if (!items.length) {
+      historyList.innerHTML = '<div class="empty-history">Nenhum upload ainda.</div>';
+      return;
+    }
+    historyList.innerHTML = items.map(it => `
+      <div class="history-row">
+        <span class="name">${it.name}</span>
+        <span class="${it.ok ? 'status-ok' : 'status-err'}">${it.ok ? '#' + it.assetId : 'falhou'}</span>
+      </div>
+    `).join('');
+  }
+
+  function pushHistory(entry) {
+    const items = JSON.parse(localStorage.getItem('rbx_history') || '[]');
+    items.unshift(entry);
+    localStorage.setItem('rbx_history', JSON.stringify(items.slice(0, 10)));
+    loadHistory();
+  }
+
+  loadHistory();
+
+  function setStatus(kind, html) {
+    statusBox.className = 'status show ' + kind;
+    statusBox.innerHTML = html;
+  }
+
+  async function pollStatus(jobId, modelName) {
+    try {
+      const res = await fetch('/status/' + jobId);
+      const data = await res.json();
+
+      if (data.status === 'processing') {
+        setStatus('processing', 'Processando… pode levar até 1-2 minutos.');
+        setTimeout(() => pollStatus(jobId, modelName), 3000);
+      } else if (data.status === 'done') {
+        let html = `Pronto. Asset ID <b>${data.assetId}</b> — <a href="${data.inventoryUrl}" target="_blank">ver inventário</a>`;
+        if (data.warnings && data.warnings.length) {
+          data.warnings.forEach(w => { html += `<span class="warning-line">${w}</span>`; });
+        }
+        setStatus('done', html);
+        pushHistory({ name: modelName, ok: true, assetId: data.assetId });
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Enviar';
+      } else if (data.status === 'error') {
+        setStatus('error', data.error || 'Algo deu errado.');
+        pushHistory({ name: modelName, ok: false });
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Enviar';
+      }
+    } catch (e) {
+      setStatus('error', 'Perdi a conexão checando o status. Confira seu inventário em alguns minutos.');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Enviar';
+    }
+  }
+
+  submitBtn.addEventListener('click', async () => {
+    if (!secretInput.value) { setStatus('error', 'Digita a senha primeiro.'); return; }
+    if (!fileInput.files.length) { setStatus('error', 'Escolhe um arquivo de modelo primeiro.'); return; }
+
+    localStorage.setItem('roblox_uploader_secret', secretInput.value);
+
+    const modelName = document.getElementById('displayName').value || fileInput.files[0].name;
+
+    const formData = new FormData();
+    formData.append('secret', secretInput.value);
+    formData.append('file', fileInput.files[0]);
+    if (textureInput.files.length) formData.append('texture', textureInput.files[0]);
+    formData.append('targetSize', document.getElementById('targetSize').value);
+    formData.append('mergeParts', document.getElementById('mergeParts').checked ? 'true' : 'false');
+    formData.append('rotateX', document.getElementById('rotateX').value || '0');
+    formData.append('rotateY', document.getElementById('rotateY').value || '0');
+    formData.append('rotateZ', document.getElementById('rotateZ').value || '0');
+    formData.append('displayName', document.getElementById('displayName').value);
+    formData.append('description', document.getElementById('description').value);
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Enviando…';
+    setStatus('processing', 'Subindo arquivo…');
+
+    try {
+      const res = await fetch('/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setStatus('error', data.error || 'Erro no envio.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Enviar';
+        return;
+      }
+
+      pollStatus(data.jobId, modelName);
+    } catch (e) {
+      setStatus('error', 'Não consegui falar com o servidor.');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Enviar';
+    }
+  });
+</script>
+</body>
+</html>
