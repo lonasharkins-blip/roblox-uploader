@@ -294,3 +294,21 @@ mesmo combinando o resto.
 - Se a peça que você quer manter separada não tiver uma textura de cor
   própria (`baseColorTexture`) detectável, ela já fica de fora do atlas de
   qualquer forma, então marcar não muda nada nesse caso.
+
+## Correções recentes
+
+- **Atlas não reduzia a quantidade de meshes**: combinar a textura
+  sozinho não funde os meshes — faltava um passo separado que realmente
+  agrupa os objetos de mesh que passaram a compartilhar o mesmo material.
+  Agora isso roda automaticamente depois do atlas. Só funde meshes "puros"
+  (1 material só) pra nunca arriscar perder um pedaço de um mesh com
+  materiais misturados.
+- **Texturas de profundidade/normal sempre removidas**: agora, em todo
+  upload (com ou sem atlas), o site tira mapas de normal/relevo, oclusão,
+  metálico-rugosidade e emissivo de todo material — só sobra a cor
+  principal.
+- **Visualizador "congelando"**: mudar a cor de destaque de uma peça
+  marcada não forçava redesenho — corrigido (mesma causa do bug de rotação
+  de antes).
+- **Lista de partes** agora mostra dois grupos separados ("Junto" /
+  "Separado") em vez de uma lista única.

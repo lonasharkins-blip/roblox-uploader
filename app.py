@@ -21,6 +21,7 @@ from pygltflib import (
     BufferView,
     Image,
     Material,
+    Mesh,
     PbrMetallicRoughness,
     Scene,
     Texture,
@@ -685,6 +686,91 @@ def normalize_scale(glb_path, target_size, work_dir):
     return output_path, factor
 
 
+def strip_non_color_textures(glb_path, work_dir):
+    """Remove de todo material qualquer textura que NÃO seja a cor base
+    (`baseColorTexture`) -- ou seja, tira mapa de normal/relevo, metálico-
+    -rugosidade, oclusão e emissivo. Roda sempre, em todo upload, porque a
+    Roblox MeshPart só usa a cor base mesmo, e mapas de normal/relevo
+    costumam ter aquela aparência arroxeada/azulada que não serve pra nada
+    aqui -- só causa confusão visual."""
+    gltf = GLTF2().load_binary(glb_path)
+    changed = False
+    for mat in gltf.materials:
+        if mat.normalTexture is not None:
+            mat.normalTexture = None
+            changed = True
+        if mat.occlusionTexture is not None:
+            mat.occlusionTexture = None
+            changed = True
+        if mat.emissiveTexture is not None:
+            mat.emissiveTexture = None
+            changed = True
+        if mat.pbrMetallicRoughness and mat.pbrMetallicRoughness.metallicRoughnessTexture is not None:
+            mat.pbrMetallicRoughness.metallicRoughnessTexture = None
+            changed = True
+
+    if not changed:
+        return glb_path
+
+    output_path = os.path.join(work_dir, "color_only.glb")
+    gltf.save_binary(output_path)
+    return output_path
+
+
+def consolidate_meshes_by_material(glb_path, work_dir):
+    """Depois do atlas, agrupa num ÚNICO objeto de mesh todos os meshes que
+    usam o mesmo material. Só trocar a textura (atlas) não reduz a
+    quantidade de meshes por si só -- é esse passo que de fato faz a Roblox
+    importar como 1 mesh em vez de várias.
+
+    Só participa da fusão um mesh 'puro' (todos os primitivos dele usam o
+    MESMO material) -- um mesh com materiais misturados fica como está, sem
+    arriscar perder algum pedaço dele por engano."""
+    gltf = GLTF2().load_binary(glb_path)
+
+    mesh_material = {}
+    for mesh_idx, mesh in enumerate(gltf.meshes):
+        materials_used = {p.material for p in mesh.primitives}
+        if len(materials_used) == 1:
+            mat = next(iter(materials_used))
+            if mat is not None:
+                mesh_material[mesh_idx] = mat
+
+    material_to_meshes = {}
+    for mesh_idx, mat in mesh_material.items():
+        material_to_meshes.setdefault(mat, []).append(mesh_idx)
+
+    groups_to_merge = {mat: meshes for mat, meshes in material_to_meshes.items() if len(meshes) > 1}
+    if not groups_to_merge:
+        return glb_path, None
+
+    node_for_mesh = {}
+    for node_idx, node in enumerate(gltf.nodes):
+        if node.mesh is not None:
+            node_for_mesh.setdefault(node.mesh, []).append(node_idx)
+
+    for mat_idx, mesh_indices in groups_to_merge.items():
+        combined_primitives = []
+        for m_idx in mesh_indices:
+            combined_primitives.extend(gltf.meshes[m_idx].primitives)
+
+        new_mesh_index = len(gltf.meshes)
+        gltf.meshes.append(Mesh(primitives=combined_primitives))
+
+        first_node = None
+        for m_idx in mesh_indices:
+            for node_idx in node_for_mesh.get(m_idx, []):
+                if first_node is None:
+                    first_node = node_idx
+                    gltf.nodes[node_idx].mesh = new_mesh_index
+                else:
+                    gltf.nodes[node_idx].mesh = None  # nó "fantasma": não renderiza nada, mas não quebra a hierarquia
+
+    output_path = os.path.join(work_dir, "consolidated.glb")
+    gltf.save_binary(output_path)
+    return output_path, None
+
+
 def merge_parts(glb_path, work_dir):
     """'Assa' a posição de cada peça/nó diretamente nos vértices e reduz a
     cena a um conjunto mínimo de meshes (via o pós-processamento
@@ -864,9 +950,19 @@ def process_job(job_id, saved_paths, display_name, description, texture_path, ta
                 except Exception as exc:  # noqa: BLE001
                     warnings.append(f"Não consegui aplicar a textura manual ({exc}); o modelo subiu sem ela.")
 
+            try:
+                glb_path = strip_non_color_textures(glb_path, work_dir)
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"Não consegui limpar texturas extras ({exc}).")
+
             diag = diagnose_missing_texture(glb_path, manual_texture_provided=bool(texture_path))
             if diag:
                 warnings.append(diag)
+
+            if merge_enabled or bake_atlas_enabled:
+                glb_path, merge_warning = merge_parts(glb_path, work_dir)
+                if merge_warning:
+                    warnings.append(merge_warning)
 
             if bake_atlas_enabled:
                 try:
@@ -877,13 +973,14 @@ def process_job(job_id, saved_paths, display_name, description, texture_path, ta
                         glb_path = atlas_path
                     if atlas_warning:
                         warnings.append(atlas_warning)
-                except Exception as exc:  # noqa: BLE001
-                    warnings.append(f"Não consegui combinar as texturas num atlas ({exc}); subiu com as texturas originais separadas.")
 
-            if merge_enabled:
-                glb_path, merge_warning = merge_parts(glb_path, work_dir)
-                if merge_warning:
-                    warnings.append(merge_warning)
+                    consolidated_path, consolidate_warning = consolidate_meshes_by_material(glb_path, work_dir)
+                    if consolidated_path:
+                        glb_path = consolidated_path
+                    if consolidate_warning:
+                        warnings.append(consolidate_warning)
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Não consegui combinar as texturas/meshes num atlas ({exc}); subiu com as texturas originais separadas.")
 
             rx, ry, rz = rotation_xyz
             if rx or ry or rz:
