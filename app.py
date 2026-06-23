@@ -48,12 +48,17 @@ ATLAS_TILE_SIZE = 512  # tamanho de cada textura individual dentro do atlas comb
 JOBS = {}
 
 
-def bake_texture_atlas(glb_path, work_dir):
+def bake_texture_atlas(glb_path, work_dir, exclude_names=None, exclude_indices=None):
     """[EXPERIMENTAL] Combina as texturas de COR de partes diferentes do
     mesmo modelo (ex: lâmina + bainha) num único atlas, redesenhando o UV de
     cada peça pra apontar pra sua região dentro do atlas -- assim o
     resultado final usa só 1 material/textura no total, em vez de uma por
     peça.
+
+    `exclude_names` (nomes de material) e `exclude_indices` (posição,
+    usada quando o material não tem nome) deixam peças específicas DE FORA
+    do atlas de propósito -- útil pra peças que devem continuar
+    independentes (ex: uma serra que precisa girar separada da arma).
 
     Só entram no atlas as texturas usadas como `baseColorTexture` (a cor
     visível) de cada material -- mapas de normal/relevo, metálico-
@@ -69,6 +74,9 @@ def bake_texture_atlas(glb_path, work_dir):
     'espremida' pra caber no atlas) e não tenho como testar contra a Roblox
     real antes de entregar, por isso é uma opção separada e desligada por
     padrão."""
+    exclude_names = exclude_names or set()
+    exclude_indices = exclude_indices or set()
+
     gltf = GLTF2().load_binary(glb_path)
 
     if not gltf.images:
@@ -76,8 +84,13 @@ def bake_texture_atlas(glb_path, work_dir):
 
     # Mapeia cada material só pela sua textura de COR (baseColorTexture) --
     # ignora normalTexture/metallicRoughnessTexture/occlusionTexture/emissiveTexture.
+    # Pula de propósito qualquer material marcado pra ficar separado.
     material_to_image = {}
     for m_idx, mat in enumerate(gltf.materials):
+        if mat.name and mat.name in exclude_names:
+            continue
+        if not mat.name and m_idx in exclude_indices:
+            continue
         if mat.pbrMetallicRoughness and mat.pbrMetallicRoughness.baseColorTexture is not None:
             tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index
             if tex_idx is not None and gltf.textures[tex_idx].source is not None:
@@ -824,7 +837,7 @@ def process_single_source(saved_path, work_dir, idx):
     return convert_to_glb(mesh_path, work_dir)
 
 
-def process_job(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled, auto_orient_enabled):
+def process_job(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled, auto_orient_enabled, exclude_parts):
     """Roda em background: extrai/converte/combina/normaliza/envia, guarda o resultado em JOBS."""
     try:
         with tempfile.TemporaryDirectory() as work_dir:
@@ -857,7 +870,9 @@ def process_job(job_id, saved_paths, display_name, description, texture_path, ta
 
             if bake_atlas_enabled:
                 try:
-                    atlas_path, atlas_warning = bake_texture_atlas(glb_path, work_dir)
+                    exclude_names = {p["name"] for p in exclude_parts if p.get("name")}
+                    exclude_indices = {p["index"] for p in exclude_parts if not p.get("name") and p.get("index") is not None}
+                    atlas_path, atlas_warning = bake_texture_atlas(glb_path, work_dir, exclude_names, exclude_indices)
                     if atlas_path:
                         glb_path = atlas_path
                     if atlas_warning:
@@ -961,6 +976,13 @@ def upload():
     bake_atlas_enabled = request.form.get("bakeAtlas", "false").strip().lower() == "true"
     auto_orient_enabled = request.form.get("autoOrient", "true").strip().lower() != "false"
 
+    try:
+        exclude_parts = json.loads(request.form.get("excludeParts", "[]") or "[]")
+        if not isinstance(exclude_parts, list):
+            exclude_parts = []
+    except (TypeError, ValueError):
+        exclude_parts = []
+
     def _parse_angle(field):
         try:
             return float(request.form.get(field, 0) or 0)
@@ -994,7 +1016,7 @@ def upload():
 
     thread = threading.Thread(
         target=process_job,
-        args=(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled, auto_orient_enabled),
+        args=(job_id, saved_paths, display_name, description, texture_path, target_size, merge_enabled, rotation_xyz, update_asset_id, bake_atlas_enabled, auto_orient_enabled, exclude_parts),
         daemon=True,
     )
     thread.start()

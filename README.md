@@ -265,3 +265,32 @@ qualquer um dos campos X/Y/Z, a auto-orientação é ignorada nesse upload
 (evita ela "competir" com um ajuste que você já fez de propósito). Se
 isso errar pra um objeto específico, é só desativar o checkbox e ajustar
 manualmente como antes.
+
+## Seletor de partes (manter peças separadas do atlas)
+
+Quando o checkbox **"Combinar texturas em 1 atlas"** está marcado e o
+modelo (`.glb`/`.gltf` único, com pré-visualização ativa) tem 2 ou mais
+materiais, aparece uma lista de partes embaixo do checkbox. Você pode:
+
+- Tocar diretamente numa peça lá no visualizador (usa a API
+  `materialFromPoint` do `model-viewer`, que identifica qual material está
+  embaixo do toque), ou
+- Marcar direto na lista.
+
+A peça marcada fica destacada em vermelho no visualizador (só um aviso
+visual, não afeta o arquivo final) e **não entra no atlas** — continua com
+a própria textura original, em mesh separado. É pra casos como uma serra
+numa arma, que precisa continuar independente pra poder girar sozinha,
+mesmo combinando o resto.
+
+**Limitações honestas:**
+- Só funciona quando a pré-visualização está disponível (1 arquivo
+  `.glb`/`.gltf` direto — não funciona com `.fbx`/`.obj`/`.zip` ou múltiplos
+  arquivos, mesma limitação de sempre da pré-visualização).
+- A seleção é enviada por **nome do material** (ou por posição, se o
+  material não tiver nome). Se o arquivo original não nomeia os materiais,
+  a correspondência por posição é um best-effort — funciona bem pra upload
+  de arquivo único, mas não é garantida.
+- Se a peça que você quer manter separada não tiver uma textura de cor
+  própria (`baseColorTexture`) detectável, ela já fica de fora do atlas de
+  qualquer forma, então marcar não muda nada nesse caso.
