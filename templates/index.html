@@ -110,6 +110,15 @@
   }
   .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
+  .part-list { display: flex; flex-direction: column; gap: 6px; }
+  .part-row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer;
+  }
+  .part-row input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+  .part-row.excluded { border-color: var(--error); color: var(--error); }
+
   .quick-rotate-row { display: flex; gap: 6px; margin-top: 8px; }
   .chip-btn {
     width: auto; flex: 1; margin-top: 0; padding: 7px 4px;
@@ -152,6 +161,21 @@
   .status .warning-line { display: block; color: var(--warn); margin-top: 6px; }
 
   hr { border: none; border-top: 1px solid var(--border); margin: 28px 0 18px; }
+
+  details {
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 0;
+    margin-bottom: 18px;
+  }
+  details summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  details[open] summary { margin-bottom: 14px; }
+  details fieldset:last-child { margin-bottom: 0; }
 
   .history-row {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -214,10 +238,9 @@
         <button type="button" class="chip-btn" data-axis="z">+90° Z</button>
         <button type="button" class="chip-btn" id="resetRotation">Zerar</button>
       </div>
-      <div class="help">Rotação em graus (X/Y/Z) pra corrigir a orientação — gira o modelo aí em cima conforme você digita.</div>
       <button type="button" id="downloadPreviewBtn" class="secondary-btn">Baixar imagem do visualizador</button>
     </div>
-    <div class="help" id="previewHint" style="display:none;">Arraste pra girar a câmera e olhar de todo ângulo.</div>
+    <div class="help" id="previewHint" style="display:none;">Arraste pra girar a câmera.</div>
   </fieldset>
 
   <fieldset>
@@ -227,43 +250,6 @@
       <span id="dropLabelTex">Só se o modelo vier sem cor</span>
     </label>
   </fieldset>
-
-  <fieldset>
-    <label for="targetSize">Tamanho (lado maior, em studs)</label>
-    <input type="number" id="targetSize" value="6" min="0.1" max="500" step="0.5" />
-    <div class="help">Padroniza o tamanho de todo modelo enviado. 6 ≈ escala de personagem.</div>
-  </fieldset>
-
-  <fieldset class="checkbox-field">
-    <label class="checkbox-label">
-      <input type="checkbox" id="mergeParts" checked />
-      Combinar peças separadas
-    </label>
-    <div class="help">Corrige peças (ex: lâmina + bainha) que vinham desencontradas ao importar uma por uma. Desative só se quiser as partes soltas de propósito.</div>
-  </fieldset>
-
-  <fieldset class="checkbox-field">
-    <label class="checkbox-label">
-      <input type="checkbox" id="bakeAtlas" />
-      Combinar texturas em 1 atlas (experimental)
-    </label>
-    <div class="help">Tenta deixar o modelo com 1 mesh + 1 textura só (em vez de uma por peça), já que a Roblox só aceita 1 textura por MeshPart. Pode perder um pouco de qualidade de imagem e ainda não testei isso contra a Roblox real — comece desligado, ative só se quiser tentar.</div>
-  </fieldset>
-
-  <fieldset class="checkbox-field">
-    <label class="checkbox-label">
-      <input type="checkbox" id="autoOrient" checked />
-      Auto-orientar "de pé" (experimental)
-    </label>
-    <div class="help">Gira automaticamente 90° pra alinhar o lado mais longo do modelo com a vertical. Funciona bem pra objetos alongados (espada, pessoa); pode errar em objetos largos/baixos de propósito (escudo, mesa). Só age se os campos de rotação abaixo estiverem em 0/0/0 — preencher algum ali desliga isso automaticamente.</div>
-  </fieldset>
-
-  <fieldset>
-    <label for="updateAssetId">Asset ID pra atualizar (opcional)</label>
-    <input type="text" id="updateAssetId" placeholder="Deixe em branco pra criar um novo" inputmode="numeric" />
-    <div class="help">Se preencher, atualiza o conteúdo desse asset (nova versão) em vez de criar um novo. Recurso beta da própria Roblox — só funciona pra assets do tipo Model.</div>
-  </fieldset>
-
 
   <fieldset>
     <div class="row-2">
@@ -278,12 +264,56 @@
     </div>
   </fieldset>
 
+  <details>
+    <summary>Opções avançadas</summary>
+
+    <fieldset>
+      <label for="targetSize">Tamanho (lado maior, em studs)</label>
+      <input type="number" id="targetSize" value="6" min="0.1" max="500" step="0.5" />
+      <div class="help">6 ≈ escala de personagem.</div>
+    </fieldset>
+
+    <fieldset class="checkbox-field">
+      <label class="checkbox-label">
+        <input type="checkbox" id="mergeParts" checked />
+        Combinar peças separadas
+      </label>
+      <div class="help">Corrige peças desencontradas (ex: lâmina + bainha).</div>
+    </fieldset>
+
+    <fieldset class="checkbox-field">
+      <label class="checkbox-label">
+        <input type="checkbox" id="autoOrient" checked />
+        Auto-orientar "de pé"
+      </label>
+      <div class="help">Gira 90° pra alinhar o lado mais longo com a vertical. Experimental — pode errar em objetos largos de propósito.</div>
+    </fieldset>
+
+    <fieldset class="checkbox-field">
+      <label class="checkbox-label">
+        <input type="checkbox" id="bakeAtlas" />
+        Combinar texturas em 1 atlas
+      </label>
+      <div class="help">Tenta deixar 1 mesh + 1 textura só. Experimental, pode perder qualidade de imagem.</div>
+      <div id="partSelector" style="display:none; margin-top:10px;">
+        <div class="help">Toque numa peça no visualizador (lá em cima) ou marque na lista pra deixar ela <b>fora</b> da combinação:</div>
+        <div id="partList" class="part-list"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <label for="updateAssetId">Asset ID pra atualizar</label>
+      <input type="text" id="updateAssetId" placeholder="Deixe em branco pra criar um novo" inputmode="numeric" />
+      <div class="help">Atualiza esse asset (nova versão) em vez de criar um novo.</div>
+    </fieldset>
+  </details>
+
   <button id="submitBtn">Enviar</button>
 
   <div class="status" id="statusBox"></div>
 
   <hr>
-  <div class="help" style="margin-bottom:8px;">O × remove só dessa lista local — a Roblox não tem uma forma de apagar o asset por API; pra isso, use o Creator Dashboard direto no site da Roblox.</div>
+  <div class="help" style="margin-bottom:8px;">× remove só da lista local (não apaga da Roblox).</div>
   <div id="historyList"></div>
 </div>
 
@@ -355,6 +385,90 @@
     }, 350);
   }
 
+  const bakeAtlasCheckbox = document.getElementById('bakeAtlas');
+  const partSelector = document.getElementById('partSelector');
+  const partList = document.getElementById('partList');
+  const excludedParts = new Set(); // guarda "index" de cada material marcado pra ficar separado
+  let knownParts = []; // [{index, name}] dos materiais do modelo carregado
+  const originalColors = new Map(); // index -> baseColorFactor original, pra poder desfazer o destaque
+
+  function partKey(part) {
+    return part.name ? `n:${part.name}` : `i:${part.index}`;
+  }
+
+  function highlightPart(index, excluded) {
+    try {
+      const material = modelPreview.model && modelPreview.model.materials[index];
+      if (!material || !material.pbrMetallicRoughness) return;
+      if (!originalColors.has(index)) {
+        originalColors.set(index, material.pbrMetallicRoughness.baseColorFactor.slice());
+      }
+      if (excluded) {
+        material.pbrMetallicRoughness.setBaseColorFactor([1, 0.35, 0.35, 1]);
+      } else {
+        const original = originalColors.get(index);
+        material.pbrMetallicRoughness.setBaseColorFactor(original);
+      }
+    } catch (e) {
+      // API de materiais pode não estar disponível em todo modelo -- ignora silenciosamente
+    }
+  }
+
+  function toggleExcluded(index) {
+    const part = knownParts.find(p => p.index === index);
+    if (!part) return;
+    const key = partKey(part);
+    const row = partList.querySelector(`[data-key="${key}"]`);
+    const checkbox = row ? row.querySelector('input') : null;
+    const nowExcluded = !excludedParts.has(key);
+
+    if (nowExcluded) excludedParts.add(key); else excludedParts.delete(key);
+    if (row) row.classList.toggle('excluded', nowExcluded);
+    if (checkbox) checkbox.checked = nowExcluded;
+    highlightPart(index, nowExcluded);
+  }
+
+  function renderPartList() {
+    partList.innerHTML = '';
+    knownParts.forEach(part => {
+      const key = partKey(part);
+      const label = part.name || `Parte ${part.index + 1}`;
+      const row = document.createElement('label');
+      row.className = 'part-row';
+      row.dataset.key = key;
+      row.innerHTML = `<input type="checkbox" /> ${label}`;
+      row.querySelector('input').addEventListener('change', () => toggleExcluded(part.index));
+      partList.appendChild(row);
+    });
+  }
+
+  function refreshPartSelectorVisibility() {
+    const shouldShow = bakeAtlasCheckbox.checked && knownParts.length >= 2;
+    partSelector.style.display = shouldShow ? 'block' : 'none';
+  }
+
+  bakeAtlasCheckbox.addEventListener('change', refreshPartSelectorVisibility);
+
+  modelPreview.addEventListener('load', () => {
+    excludedParts.clear();
+    originalColors.clear();
+    knownParts = [];
+    try {
+      const materials = (modelPreview.model && modelPreview.model.materials) || [];
+      knownParts = materials.map((m, i) => ({ index: i, name: m.name || '' }));
+    } catch (e) {
+      knownParts = [];
+    }
+    renderPartList();
+    refreshPartSelectorVisibility();
+  });
+
+  modelPreview.addEventListener('click', (event) => {
+    if (!bakeAtlasCheckbox.checked || typeof modelPreview.materialFromPoint !== 'function') return;
+    const material = modelPreview.materialFromPoint(event.clientX, event.clientY);
+    if (material) toggleExcluded(material.index);
+  });
+
   fileInput.addEventListener('change', () => {
     if (!fileInput.files.length) return;
     const files = Array.from(fileInput.files);
@@ -368,6 +482,10 @@
       multiFileHint.style.display = 'block';
     }
     dropArea.classList.add('has-file');
+
+    excludedParts.clear();
+    partList.innerHTML = '';
+    partSelector.style.display = 'none';
 
     const ext = files[0].name.toLowerCase().split('.').pop();
     if (files.length === 1 && (ext === 'glb' || ext === 'gltf')) {
@@ -539,6 +657,10 @@
     formData.append('targetSize', document.getElementById('targetSize').value);
     formData.append('mergeParts', document.getElementById('mergeParts').checked ? 'true' : 'false');
     formData.append('bakeAtlas', document.getElementById('bakeAtlas').checked ? 'true' : 'false');
+    const excludePartsPayload = knownParts
+      .filter(p => excludedParts.has(partKey(p)))
+      .map(p => ({ index: p.index, name: p.name || null }));
+    formData.append('excludeParts', JSON.stringify(excludePartsPayload));
     formData.append('autoOrient', document.getElementById('autoOrient').checked ? 'true' : 'false');
     formData.append('updateAssetId', document.getElementById('updateAssetId').value.trim());
     formData.append('rotateX', document.getElementById('rotateX').value || '0');
