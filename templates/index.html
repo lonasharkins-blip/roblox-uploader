@@ -111,6 +111,8 @@
   .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
   .part-list { display: flex; flex-direction: column; gap: 6px; }
+  .part-group-title { font-size: 11px; color: var(--muted); text-transform: uppercase; margin-top: 6px; }
+  .part-group-title:first-child { margin-top: 0; }
   .part-row {
     display: flex; align-items: center; gap: 8px;
     font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
@@ -286,7 +288,7 @@
         <input type="checkbox" id="autoOrient" checked />
         Auto-orientar "de pé"
       </label>
-      <div class="help">Gira 90° pra alinhar o lado mais longo com a vertical. Experimental — pode errar em objetos largos de propósito.</div>
+      <div class="help">Alinha o lado mais longo com a vertical. Pode errar em objetos largos.</div>
     </fieldset>
 
     <fieldset class="checkbox-field">
@@ -294,9 +296,9 @@
         <input type="checkbox" id="bakeAtlas" />
         Combinar texturas em 1 atlas
       </label>
-      <div class="help">Tenta deixar 1 mesh + 1 textura só. Experimental, pode perder qualidade de imagem.</div>
+      <div class="help">1 mesh + 1 textura só. Pode perder qualidade de imagem.</div>
       <div id="partSelector" style="display:none; margin-top:10px;">
-        <div class="help">Toque numa peça no visualizador (lá em cima) ou marque na lista pra deixar ela <b>fora</b> da combinação:</div>
+        <div class="help">Toque numa peça ou marque na lista pra separar:</div>
         <div id="partList" class="part-list"></div>
       </div>
     </fieldset>
@@ -304,7 +306,7 @@
     <fieldset>
       <label for="updateAssetId">Asset ID pra atualizar</label>
       <input type="text" id="updateAssetId" placeholder="Deixe em branco pra criar um novo" inputmode="numeric" />
-      <div class="help">Atualiza esse asset (nova versão) em vez de criar um novo.</div>
+      <div class="help">Cria nova versão desse asset, em vez de um novo.</div>
     </fieldset>
   </details>
 
@@ -313,7 +315,7 @@
   <div class="status" id="statusBox"></div>
 
   <hr>
-  <div class="help" style="margin-bottom:8px;">× remove só da lista local (não apaga da Roblox).</div>
+  <div class="help" style="margin-bottom:8px;">× remove só da lista local.</div>
   <div id="historyList"></div>
 </div>
 
@@ -396,6 +398,12 @@
     return part.name ? `n:${part.name}` : `i:${part.index}`;
   }
 
+  function forceRedraw() {
+    if (typeof modelPreview.jumpCameraToGoal === 'function') {
+      modelPreview.jumpCameraToGoal();
+    }
+  }
+
   function highlightPart(index, excluded) {
     try {
       const material = modelPreview.model && modelPreview.model.materials[index];
@@ -409,6 +417,7 @@
         const original = originalColors.get(index);
         material.pbrMetallicRoughness.setBaseColorFactor(original);
       }
+      forceRedraw();
     } catch (e) {
       // API de materiais pode não estar disponível em todo modelo -- ignora silenciosamente
     }
@@ -418,28 +427,45 @@
     const part = knownParts.find(p => p.index === index);
     if (!part) return;
     const key = partKey(part);
-    const row = partList.querySelector(`[data-key="${key}"]`);
-    const checkbox = row ? row.querySelector('input') : null;
     const nowExcluded = !excludedParts.has(key);
-
     if (nowExcluded) excludedParts.add(key); else excludedParts.delete(key);
-    if (row) row.classList.toggle('excluded', nowExcluded);
-    if (checkbox) checkbox.checked = nowExcluded;
     highlightPart(index, nowExcluded);
+    renderPartList();
   }
 
   function renderPartList() {
     partList.innerHTML = '';
-    knownParts.forEach(part => {
-      const key = partKey(part);
+    const together = knownParts.filter(p => !excludedParts.has(partKey(p)));
+    const separate = knownParts.filter(p => excludedParts.has(partKey(p)));
+
+    function addRow(part, excluded) {
       const label = part.name || `Parte ${part.index + 1}`;
       const row = document.createElement('label');
-      row.className = 'part-row';
-      row.dataset.key = key;
-      row.innerHTML = `<input type="checkbox" /> ${label}`;
+      row.className = 'part-row' + (excluded ? ' excluded' : '');
+      row.dataset.key = partKey(part);
+      row.innerHTML = `<input type="checkbox" ${excluded ? 'checked' : ''} /> ${label}`;
       row.querySelector('input').addEventListener('change', () => toggleExcluded(part.index));
       partList.appendChild(row);
-    });
+    }
+
+    const togetherTitle = document.createElement('div');
+    togetherTitle.className = 'part-group-title';
+    togetherTitle.textContent = 'Junto:';
+    partList.appendChild(togetherTitle);
+    together.forEach(p => addRow(p, false));
+
+    const separateTitle = document.createElement('div');
+    separateTitle.className = 'part-group-title';
+    separateTitle.textContent = 'Separado:';
+    partList.appendChild(separateTitle);
+    if (separate.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'help';
+      empty.textContent = 'Nenhuma (toque numa peça pra separar).';
+      partList.appendChild(empty);
+    } else {
+      separate.forEach(p => addRow(p, true));
+    }
   }
 
   function refreshPartSelectorVisibility() {
@@ -478,7 +504,7 @@
       multiFileHint.style.display = 'none';
     } else {
       dropLabel.textContent = `${files.length} arquivos selecionados`;
-      multiFileHint.textContent = `Esses ${files.length} arquivos vão ser combinados num único modelo final.`;
+      multiFileHint.textContent = `${files.length} arquivos serão combinados num modelo só.`;
       multiFileHint.style.display = 'block';
     }
     dropArea.classList.add('has-file');
